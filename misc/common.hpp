@@ -48,21 +48,20 @@ struct message {
 		}
 		if (_raw[_from] == DEL) {
 			for (; _to < _raw.length() && _raw[_to] == DEL; _to++);
-		} else {
-			for (; _to < _raw.length() && _raw[_to] != DEL; _to++);
+			return;
 		}
+		for (; _to < _raw.length() && _raw[_to] != DEL; _to++);
 	}
 
 	void next_field() {
-		if (_raw[_from] == DEL) {
-			_from = _to;
-			_to++;
+		bool del_phase = _raw[_from] == DEL;
+		_from = _to;
+		_to++;
+		if (del_phase) {
 			for (; _to < _raw.length() && _raw[_to] != DEL; _to++);
-		} else {
-			_from = _to;
-			_to++;
-			for (; _to < _raw.length() && _raw[_to] == DEL; _to++);
+			return;
 		}
+		for (; _to < _raw.length() && _raw[_to] == DEL; _to++);
 	}
 
 	bool has_next() const { return _to <= _raw.length(); }
