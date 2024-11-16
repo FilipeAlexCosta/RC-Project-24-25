@@ -19,10 +19,15 @@ void test(const std::string& str) {
 	while (msg.has_next()) {
 		size_t j = 1;
 		std::cout << "||| Field " << i << "|||\n";
-		for (char c : msg) {
-			std::cout << j << ": " << c << "\n";
+		std::cout << "Is in del phase? " << msg.is_in_delimiter_phase() << "\n";
+		for (auto f = msg.rbegin(); f != msg.rend(); f++) {
+			std::cout << j << ": " << (*f) << "\n";
 			j++;
 		}
+		/*for (char c : msg) {
+			std::cout << j << ": " << c << "\n";
+			j++;
+		}*/
 		msg.next_field();
 		i++;
 	};

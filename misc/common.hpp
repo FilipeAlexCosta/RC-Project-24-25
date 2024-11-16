@@ -24,16 +24,12 @@ ssize_t udp_write(int socket_fd, int flags, const struct sockaddr* dest_addr, so
 
 struct message {
 	struct field {
-		field(const message& parent, int8_t direction, ssize_t index = 0)
-			: _parent{parent}, _direction{direction}, _idx{index} {
-			_idx += _parent._from;
-		}
-
-		void operator++(int) { _idx += _direction; }
-		void operator++() { _idx += _direction; }
-		char operator*() const { return _parent._raw[_idx]; }
-		bool operator!=(const field& other) const { return _idx != other._idx; }
-		size_t length() const { return _parent._to - _parent._from; }
+		field(const message& parent, int8_t direction, ssize_t index = 0);
+		void operator++(int);
+		void operator++();
+		char operator*() const;
+		bool operator!=(const field& other) const;
+		size_t length() const;
 
 	private:
 		ssize_t _idx;
@@ -41,38 +37,19 @@ struct message {
 		const message& _parent;
 	};
 
-	message(const std::string& msg) : _raw{msg} {
-		if (_raw.length() == 0) {
-			_to = 1;
-			return;
-		}
-		if (_raw[_from] == DEL) {
-			for (; _to < _raw.length() && _raw[_to] == DEL; _to++);
-			return;
-		}
-		for (; _to < _raw.length() && _raw[_to] != DEL; _to++);
-	}
-
-	void next_field() {
-		bool del_phase = _raw[_from] == DEL;
-		_from = _to;
-		_to++;
-		if (del_phase) {
-			for (; _to < _raw.length() && _raw[_to] != DEL; _to++);
-			return;
-		}
-		for (; _to < _raw.length() && _raw[_to] == DEL; _to++);
-	}
-
-	bool has_next() const { return _to <= _raw.length(); }
-	field begin() const { return field(*this, 1); }
-	field end() const { return field(*this, 1, _to - _from); }
-	field rbegin() const { return field(*this, -1, _to - _from - 1); }
-	field rend() const { return field(*this, -1, -1); }
+	message(const std::string& msg);
+	void next_field();
+	bool is_in_delimiter_phase() const;
+	bool has_next() const;
+	field begin() const;
+	field end() const;
+	field rbegin() const;
+	field rend() const;
 
 private:
 	size_t _from = 0;
 	size_t _to = 0;
+	bool _in_del_phase;
 	std::string _raw;
 	static const char DEL = ' ';
 };
