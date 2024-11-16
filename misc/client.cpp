@@ -5,8 +5,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include <string.h>
-#include <stdio.h>
 
 #include "common.hpp"
 #include <iostream>
@@ -48,21 +46,37 @@ int main() {
 
 	net::action_map actions;
 	actions.add_action("start",
-		[](net::message& msg) -> int {
+		[](const net::message& msg) -> int {
 			std::cout << "Inside start action\n";
-			while (msg.has_next()) {
-				if (msg.is_in_delimiter_phase()) {
-					msg.next_field();
-					continue;
-				}
-				std::cout << "New field\n";
-				int i = 0;
-				for (char c : msg) {
-					std::cout << i << ": " << c << "\n";
-					i++;
-				}
-				msg.next_field();
-			}
+			for (auto f : msg)
+				std::cout << "Field: \"" << f << "\"\n";
+			return 0;
+		}
+	);
+
+	actions.add_action("try",
+		[](const net::message& msg) -> int {
+			std::cout << "Inside try action\n";
+			for (auto f : msg)
+				std::cout << "Field: \"" << f << "\"\n";
+			return 0;
+		}
+	);
+
+	actions.add_action("show_trials",
+		[](const net::message& msg) -> int {
+			std::cout << "Inside show_trials action\n";
+			for (auto f : msg)
+				std::cout << "Field: \"" << f << "\"\n";
+			return 0;
+		}
+	);
+
+	actions.add_action("st",
+		[](const net::message& msg) -> int {
+			std::cout << "Inside st action\n";
+			for (auto f : msg)
+				std::cout << "Field: \"" << f << "\"\n";
 			return 0;
 		}
 	);
@@ -74,6 +88,5 @@ int main() {
 			std::cout << "Failed to execute an action\n";
 	}
 	actions.execute("start test");
-
 	return 0;
 }

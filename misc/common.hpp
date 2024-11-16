@@ -23,50 +23,38 @@ ssize_t udp_write(int socket_fd, int flags, const struct sockaddr* dest_addr, so
 }
 
 struct message {
-	struct field {
-		field(const message& parent, ssize_t index = 0);
-		void operator++(int);
-		void operator++();
-		char operator[](int) const;
-		char operator*() const;
-		bool operator!=(const field& other) const;
-		size_t length() const;
+	struct iterator {
+		using field = std::string_view;
 
-	protected:
-		ssize_t _idx;
+		iterator(const message& message, char delimiter);
+		void operator++();
+		bool operator!=(size_t other) const;
+		bool operator==(size_t other) const;
+		field operator*() const;
+		bool is_in_delimiter_phase() const;
+
+	private:
 		const message& _parent;
-	};
-
-	struct reverse_field : public field {
-		reverse_field(const message& parent, ssize_t index = 0);
-		void operator++(int);
-		void operator++();
-		char operator[](int) const;
+		size_t _from = 0, _to = 0;
+		char _delimiter;
+		bool _in_del_phase;
 	};
 
 	message(const std::string& msg);
-	void next_field();
-	bool is_in_delimiter_phase() const;
-	bool has_next() const;
-	field begin() const;
-	field end() const;
-	reverse_field rbegin() const;
-	reverse_field rend() const;
-	std::string extract_field() const;
+	iterator begin(char delimiter = ' ') const;
+	size_t end() const;
+	const std::string& data() const;
 
 private:
-	size_t _from = 0;
-	size_t _to = 0;
-	bool _in_del_phase;
 	std::string _raw;
-	static const char DEL = ' ';
 };
 
 struct action_map {
-	action_map& add_action(const std::string& name, const std::function<int(message&)>& action);
+	using action = std::function<int(const message&)>;
+	action_map& add_action(const std::string& name, const action& action);
 	int execute(const std::string& command) const;
 private:
-	std::unordered_map<std::string, std::function<int(message&)>> _actions;
+	std::unordered_map<std::string, action> _actions;
 };
 };
 
