@@ -65,6 +65,10 @@ void message::field::operator++() {
 	_idx++;
 }
 
+char message::field::operator[](int idx) const {
+	return _parent._raw[_parent._from + idx];
+}
+
 char message::field::operator*() const {
 	return _parent._raw[_idx];
 }
@@ -88,4 +92,8 @@ void message::reverse_field::operator++(int) {
 
 void message::reverse_field::operator++() {
 	_idx--;
+}
+
+char message::reverse_field::operator[](int idx) const {
+	return _parent._raw[_parent._to - 1 - idx];
 }

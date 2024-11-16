@@ -27,6 +27,7 @@ struct message {
 		field(const message& parent, ssize_t index = 0);
 		void operator++(int);
 		void operator++();
+		char operator[](int) const;
 		char operator*() const;
 		bool operator!=(const field& other) const;
 		size_t length() const;
@@ -40,6 +41,7 @@ struct message {
 		reverse_field(const message& parent, ssize_t index = 0);
 		void operator++(int);
 		void operator++();
+		char operator[](int) const;
 	};
 
 	message(const std::string& msg);
