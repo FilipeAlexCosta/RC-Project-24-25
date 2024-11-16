@@ -37,32 +37,32 @@ bool message::has_next() const {
 }
 
 message::field message::begin() const {
-	return field(*this, 1);
+	return field(*this);
 }
 
 message::field message::end() const {
-	return field(*this, 1, _to - _from);
+	return field(*this, _to - _from);
 }
 
-message::field message::rbegin() const {
-	return field(*this, -1, _to - _from - 1);
+message::reverse_field message::rbegin() const {
+	return reverse_field(*this);
 }
 
-message::field message::rend() const {
-	return field(*this, -1, -1);
+message::reverse_field message::rend() const {
+	return reverse_field(*this, _to - _from);
 }
 
-message::field::field(const message& parent, int8_t direction, ssize_t index)
-	: _parent{parent}, _direction{direction}, _idx{index} {
+message::field::field(const message& parent, ssize_t index)
+	: _parent{parent}, _idx{index} {
 	_idx += _parent._from;
 }
 
 void message::field::operator++(int) {
-	_idx += _direction;
+	_idx++;
 }
 
 void message::field::operator++() {
-	_idx += _direction;
+	_idx++;
 }
 
 char message::field::operator*() const {
@@ -75,4 +75,17 @@ bool message::field::operator!=(const field& other) const {
 
 size_t message::field::length() const {
 	return _parent._to - _parent._from;
+}
+
+message::reverse_field::reverse_field(const message& parent, ssize_t index)
+	: field(parent, index) {
+	_idx = _parent._to - index - 1;
+}
+
+void message::reverse_field::operator++(int) {
+	_idx--;
+}
+
+void message::reverse_field::operator++() {
+	_idx--;
 }

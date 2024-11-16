@@ -24,17 +24,22 @@ ssize_t udp_write(int socket_fd, int flags, const struct sockaddr* dest_addr, so
 
 struct message {
 	struct field {
-		field(const message& parent, int8_t direction, ssize_t index = 0);
+		field(const message& parent, ssize_t index = 0);
 		void operator++(int);
 		void operator++();
 		char operator*() const;
 		bool operator!=(const field& other) const;
 		size_t length() const;
 
-	private:
+	protected:
 		ssize_t _idx;
-		int8_t _direction;
 		const message& _parent;
+	};
+
+	struct reverse_field : public field {
+		reverse_field(const message& parent, ssize_t index = 0);
+		void operator++(int);
+		void operator++();
 	};
 
 	message(const std::string& msg);
@@ -43,8 +48,8 @@ struct message {
 	bool has_next() const;
 	field begin() const;
 	field end() const;
-	field rbegin() const;
-	field rend() const;
+	reverse_field rbegin() const;
+	reverse_field rend() const;
 
 private:
 	size_t _from = 0;
