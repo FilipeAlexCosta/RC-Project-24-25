@@ -36,6 +36,10 @@ bool message::has_next() const {
 	return _to <= _raw.length();
 }
 
+std::string message::extract_field() const {
+	return std::string(_raw.begin() + _from, _raw.begin() + _to);
+}
+
 message::field message::begin() const {
 	return field(*this);
 }
@@ -96,4 +100,21 @@ void message::reverse_field::operator++() {
 
 char message::reverse_field::operator[](int idx) const {
 	return _parent._raw[_parent._to - 1 - idx];
+}
+
+action_map& action_map::add_action(const std::string& name, const std::function<int(message&)>& action) {
+	_actions.insert({name, action});
+	return *this;
+}
+
+int action_map::execute(const std::string& command) const {
+	message msg{command};
+	if (!msg.has_next())
+		return 1;
+	if (msg.is_in_delimiter_phase())
+		msg.next_field();
+	auto it = _actions.find(msg.extract_field());
+	if (it == _actions.end())
+		return 1;
+	return it->second(msg);
 }

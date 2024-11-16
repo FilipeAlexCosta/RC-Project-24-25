@@ -52,6 +52,7 @@ struct message {
 	field end() const;
 	reverse_field rbegin() const;
 	reverse_field rend() const;
+	std::string extract_field() const;
 
 private:
 	size_t _from = 0;
@@ -62,8 +63,10 @@ private:
 };
 
 struct action_map {
+	action_map& add_action(const std::string& name, const std::function<int(message&)>& action);
+	int execute(const std::string& command) const;
 private:
-	std::unordered_map<std::string, std::function<void(message&)>> _actions;
+	std::unordered_map<std::string, std::function<int(message&)>> _actions;
 };
 };
 

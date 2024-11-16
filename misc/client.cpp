@@ -13,26 +13,6 @@
 
 #define PORT "58001"
 
-void test(const std::string& str) {
-	net::message msg{str};
-	size_t i = 1;
-	while (msg.has_next()) {
-		size_t j = 1;
-		std::cout << "||| Field " << i << "|||\n";
-		std::cout << "Is in del phase? " << msg.is_in_delimiter_phase() << "\n";
-		for (auto f = msg.rbegin(); f != msg.rend(); f++) {
-			std::cout << j << ": " << (*f) << "\n";
-			j++;
-		}
-		/*for (char c : msg) {
-			std::cout << j << ": " << c << "\n";
-			j++;
-		}*/
-		msg.next_field();
-		i++;
-	};
-}
-
 int main() {
 	/*int fd, errcode;
 	ssize_t n;
@@ -66,9 +46,34 @@ int main() {
 	freeaddrinfo(res);
 	close(fd);*/
 
-	test("start PLID max_playtime");
-	test(" start PLID max_playtime ");
-	test("");
+	net::action_map actions;
+	actions.add_action("start",
+		[](net::message& msg) -> int {
+			std::cout << "Inside start action\n";
+			while (msg.has_next()) {
+				if (msg.is_in_delimiter_phase()) {
+					msg.next_field();
+					continue;
+				}
+				std::cout << "New field\n";
+				int i = 0;
+				for (char c : msg) {
+					std::cout << i << ": " << c << "\n";
+					i++;
+				}
+				msg.next_field();
+			}
+			return 0;
+		}
+	);
+
+	while (true) {
+		std::string input;
+		std::getline(std::cin, input);
+		if (actions.execute(input))
+			std::cout << "Failed to execute an action\n";
+	}
+	actions.execute("start test");
 
 	return 0;
 }
