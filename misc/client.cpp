@@ -63,7 +63,7 @@ int main() {
 		}
 	);
 
-	actions.add_action("show_trials",
+	actions.add_action({"show_trials", "st"},
 		[](const net::message& msg) -> int {
 			std::cout << "Inside show_trials action\n";
 			for (auto f : msg)
@@ -72,9 +72,36 @@ int main() {
 		}
 	);
 
-	actions.add_action("st",
+	actions.add_action({"scoreboard", "sb"},
 		[](const net::message& msg) -> int {
-			std::cout << "Inside st action\n";
+			std::cout << "Inside scoreboard action\n";
+			for (auto f : msg)
+				std::cout << "Field: \"" << f << "\"\n";
+			return 0;
+		}
+	);
+
+	actions.add_action("quit",
+		[](const net::message& msg) -> int {
+			std::cout << "Inside quit action\n";
+			for (auto f : msg)
+				std::cout << "Field: \"" << f << "\"\n";
+			return 0;
+		}
+	);
+
+	actions.add_action("exit",
+		[](const net::message& msg) -> int {
+			std::cout << "Inside debug action\n";
+			for (auto f : msg)
+				std::cout << "Field: \"" << f << "\"\n";
+			return 0;
+		}
+	);
+
+	actions.add_action("debug",
+		[](const net::message& msg) -> int {
+			std::cout << "Inside debug action\n";
 			for (auto f : msg)
 				std::cout << "Field: \"" << f << "\"\n";
 			return 0;

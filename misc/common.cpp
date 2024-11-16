@@ -58,9 +58,13 @@ const std::string& message::data() const {
 	return _raw;
 }
 
-action_map& action_map::add_action(const std::string& name, const action& action) {
-	_actions.insert({name, action});
-	return *this;
+void action_map::add_action(const std::string_view& name, const action& action) {
+	_actions.insert({std::move(static_cast<std::string>(name)), action});
+}
+
+void action_map::add_action(std::initializer_list<const std::string_view> names, const action& action) {
+	for (auto name : names)
+		add_action(name, action);
 }
 
 int action_map::execute(const std::string& command) const {

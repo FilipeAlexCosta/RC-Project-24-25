@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <functional>
 #include <string>
+#include <initializer_list>
 
 namespace net {
 template<typename... Ts>
@@ -51,7 +52,8 @@ private:
 
 struct action_map {
 	using action = std::function<int(const message&)>;
-	action_map& add_action(const std::string& name, const action& action);
+	void add_action(const std::string_view& name, const action& action);
+	void add_action(std::initializer_list<const std::string_view> names, const action& action);
 	int execute(const std::string& command) const;
 private:
 	std::unordered_map<std::string, action> _actions;
