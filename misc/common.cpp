@@ -16,16 +16,17 @@ message::iterator::iterator(const message& message, char delimiter) : _parent{me
 	_in_del_phase = false;
 }
 
-void message::iterator::operator++() {
+message::iterator& message::iterator::operator++() {
 	_from = _to;
 	_to++;
 	if (_in_del_phase) {
 		for (; _to < _parent._raw.length() && _parent._raw[_to] != _delimiter; _to++);
 		_in_del_phase = false;
-		return;
+		return *this;
 	}
 	for (; _to < _parent._raw.length() && _parent._raw[_to] == _delimiter; _to++);
 	_in_del_phase = true;
+	return *this;
 }
 
 bool message::iterator::operator!=(size_t other) const {
@@ -67,18 +68,18 @@ void action_map::add_action(std::initializer_list<const std::string_view> names,
 		add_action(name, action);
 }
 
-int action_map::execute(const std::string& command) const {
+action_status action_map::execute(const std::string& command) const {
 	message msg{command};
 	auto field_it = msg.begin();
 	if (field_it == msg.end())
-		return 1;
+		return action_status::UNK_ACTION;
 	if (field_it.is_in_delimiter_phase()) {
 		++field_it;
 		if (field_it == msg.end())
-			return 1;
+			return action_status::UNK_ACTION;
 	}
 	auto it = _actions.find(static_cast<std::string>(*field_it));
 	if (it == _actions.end())
-		return 1;
+		return action_status::UNK_ACTION;
 	return it->second(msg);
 }

@@ -11,6 +11,8 @@
 
 #define PORT "58001"
 
+static net::action_status do_start(const net::message& msg);
+
 int main() {
 	/*int fd, errcode;
 	ssize_t n;
@@ -45,16 +47,9 @@ int main() {
 	close(fd);*/
 
 	net::action_map actions;
-	actions.add_action("start",
-		[](const net::message& msg) -> int {
-			std::cout << "Inside start action\n";
-			for (auto f : msg)
-				std::cout << "Field: \"" << f << "\"\n";
-			return 0;
-		}
-	);
+	actions.add_action("start", do_start);
 
-	actions.add_action("try",
+	/*actions.add_action("try",
 		[](const net::message& msg) -> int {
 			std::cout << "Inside try action\n";
 			for (auto f : msg)
@@ -106,14 +101,55 @@ int main() {
 				std::cout << "Field: \"" << f << "\"\n";
 			return 0;
 		}
-	);
+	);*/
 
 	while (true) {
 		std::string input;
 		std::getline(std::cin, input);
-		if (actions.execute(input))
+		if (actions.execute(input) != net::action_status::OK)
 			std::cout << "Failed to execute an action\n";
 	}
 	actions.execute("start test");
 	return 0;
+}
+
+static net::action_status do_start(const net::message& msg) {
+	auto field_it = std::begin(msg);
+	if (field_it.is_in_delimiter_phase()) // ignore leading whitespace
+		++field_it;
+	if ((++field_it) == std::end(msg)) // ignore "start"
+		return net::action_status::MISSING_ARG;
+	if ((++field_it) == std::end(msg)) // ignore delimiter phase
+		return net::action_status::MISSING_ARG;
+
+	int plid = -1;
+	if ((*field_it).length() > 6) // PLID has 6 digits
+		return net::action_status::BAD_ARG;
+	try {
+		plid = std::stoi(std::string(*field_it));
+	} catch (const std::invalid_argument& err) { // cannot be read
+		return net::action_status::BAD_ARG;
+	} // out_of_range exception shouldn't be an issue
+	if (plid < 0) // plid must be non-negative
+		return net::action_status::BAD_ARG;
+
+	if ((++field_it) == std::end(msg)) // go to del phase
+		return net::action_status::MISSING_ARG;
+	if ((++field_it) == std::end(msg)) // go to max_playtime
+		return net::action_status::MISSING_ARG;
+
+	int max_playtime = -1;
+	if ((*field_it).length() > 3) // check <= 999
+		return net::action_status::BAD_ARG;
+	try {
+		max_playtime = std::stoi(std::string(*field_it));
+	} catch (const std::invalid_argument& err) { // cannot be read
+		return net::action_status::BAD_ARG;
+	} // out_of_range exception shouldn't be an issue
+	if (max_playtime < 0 || max_playtime > 600) // check <= 600
+		return net::action_status::BAD_ARG;
+
+	if ((++field_it) == std::end(msg) || (++field_it) == std::end(msg))
+		return net::action_status::OK;
+	return net::action_status::EXCESS_ARGS;
 }

@@ -8,7 +8,18 @@
 #include <string>
 #include <initializer_list>
 
+#define DEFAULT_MSG_DELIMITER ' '
+#define DEFAULT_END_OF_MSG '\n'
+
 namespace net {
+enum class action_status {
+	OK,
+	UNK_ACTION,
+	MISSING_ARG,
+	EXCESS_ARGS,
+	BAD_ARG
+};
+
 template<typename... Ts>
 ssize_t udp_write(int socket_fd, int flags, const struct sockaddr* dest_addr, socklen_t addrlen, Ts... args) {
 	static_assert(sizeof...(Ts) > 0, "udp_write: must write at least one argument");
@@ -28,7 +39,7 @@ struct message {
 		using field = std::string_view;
 
 		iterator(const message& message, char delimiter);
-		void operator++();
+		iterator& operator++();
 		bool operator!=(size_t other) const;
 		bool operator==(size_t other) const;
 		field operator*() const;
@@ -42,7 +53,7 @@ struct message {
 	};
 
 	message(const std::string& msg);
-	iterator begin(char delimiter = ' ') const;
+	iterator begin(char delimiter = DEFAULT_MSG_DELIMITER) const;
 	size_t end() const;
 	const std::string& data() const;
 
@@ -51,10 +62,10 @@ private:
 };
 
 struct action_map {
-	using action = std::function<int(const message&)>;
+	using action = std::function<action_status(const message&)>;
 	void add_action(const std::string_view& name, const action& action);
 	void add_action(std::initializer_list<const std::string_view> names, const action& action);
-	int execute(const std::string& command) const;
+	action_status execute(const std::string& command) const;
 private:
 	std::unordered_map<std::string, action> _actions;
 };
