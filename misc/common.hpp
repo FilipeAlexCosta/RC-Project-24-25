@@ -11,6 +11,7 @@
 #define DEFAULT_MSG_DELIMITER ' '
 #define DEFAULT_END_OF_MSG '\n'
 #define GUESS_SIZE 4
+#define PLID_SIZE 6
 
 namespace net {
 enum class action_status {

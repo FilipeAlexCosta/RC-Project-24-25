@@ -14,7 +14,7 @@
 
 static bool in_game = false;
 static bool exit_app = false;
-static char current_plid[6];
+static char current_plid[PLID_SIZE];
 static const std::string_view valid_colors = "RGBYOP";
 
 static net::action_status do_start(const net::message& msg);
@@ -87,7 +87,7 @@ static bool is_valid_color(char color) {
 }
 
 static net::action_status is_valid_plid(const net::message::iterator::field& field) {
-	if (field.length() != 6) // PLID has 6 digits
+	if (field.length() != PLID_SIZE) // PLID has 6 digits
 		return net::action_status::BAD_ARG;
 	for (char c : field)
 		if (c < '0' || c > '9')
@@ -128,6 +128,12 @@ static net::action_status parse_guess(const net::message& msg, net::message::ite
 	return net::action_status::OK;
 }
 
+static void setup_game_clientside(const net::message::iterator::field& plid) {
+	in_game = true;
+	for (int i = 0; i < PLID_SIZE; i++)
+		current_plid[i] = plid[i];
+}
+
 static net::action_status do_start(const net::message& msg) {
 	auto field_it = std::begin(msg);
 	if (field_it.is_in_delimiter_phase()) // ignore leading whitespace
@@ -156,10 +162,9 @@ static net::action_status do_start(const net::message& msg) {
 		return net::action_status::EXCESS_ARGS;
 	if (in_game)
 		return net::action_status::ONGOING_GAME;
-	in_game = true;
 
 	// TODO: send request
-	// TODO: set plid if OK
+	setup_game_clientside(plid);
 
 	std::cout << "PLID: " << plid << '\n';
 	std::cout << "time: " << max_playtime << '\n';
@@ -244,7 +249,7 @@ static net::action_status do_debug(const net::message& msg) {
 	if ((++field_it) == std::end(msg)) // ignore "debug"
 		return net::action_status::MISSING_ARG;
 	if ((++field_it) == std::end(msg)) // ignore delimiter phase
-		return net::action_status::MISSING_ARG;	
+		return net::action_status::MISSING_ARG;
 	auto status = is_valid_plid(std::string(*field_it));
 	if (status != net::action_status::OK)
 		return status;
@@ -274,7 +279,9 @@ static net::action_status do_debug(const net::message& msg) {
 		return net::action_status::EXCESS_ARGS;
 	if (in_game)
 		return net::action_status::ONGOING_GAME;
-	in_game = true;
+
+	// TODO: send request
+	setup_game_clientside(plid);
 
 	std::cout << "PLID: " << plid << '\n';
 	std::cout << "time: " << max_playtime << '\n';
