@@ -8,3 +8,6 @@ client: client.cpp common.cpp
 
 server: server.cpp common.cpp
 	$(CC) $(FLAGS) server.cpp common.cpp -o server 
+
+clean:
+	rm -f client server
