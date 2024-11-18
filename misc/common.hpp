@@ -10,6 +10,7 @@
 
 #define DEFAULT_MSG_DELIMITER ' '
 #define DEFAULT_END_OF_MSG '\n'
+#define GUESS_SIZE 4
 
 namespace net {
 enum class action_status {
@@ -17,8 +18,12 @@ enum class action_status {
 	UNK_ACTION,
 	MISSING_ARG,
 	EXCESS_ARGS,
-	BAD_ARG
+	BAD_ARG,
+	ONGOING_GAME,
+	NOT_IN_GAME
 };
+
+std::string status_to_message(action_status status);
 
 template<typename... Ts>
 ssize_t udp_write(int socket_fd, int flags, const struct sockaddr* dest_addr, socklen_t addrlen, Ts... args) {

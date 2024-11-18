@@ -2,6 +2,43 @@
 
 using namespace net;
 
+std::string net::status_to_message(action_status status) {
+	std::string res = "get_error_message failed";
+	switch (status) {
+		case action_status::OK:
+			res = "No error";
+			break;
+
+		case action_status::UNK_ACTION:
+			res = "Requested command does not exist";
+			break;
+
+		case action_status::MISSING_ARG:
+			res = "Missing arguments for requested command";
+			break;
+
+		case action_status::EXCESS_ARGS:
+			res = "Excess arguments for requested command";
+			break;
+
+		case action_status::BAD_ARG:
+			res = "Ilegal argument for requested command";
+			break;
+
+		case action_status::ONGOING_GAME:
+			res = "Requested command can only be called after finishing the current game";
+			break;
+
+		case action_status::NOT_IN_GAME:
+			res = "Requested command can only be called after starting a game";
+			break;
+
+		default:
+			res = "Unknown error";
+	}
+	return res;
+}
+
 message::iterator::iterator(const message& message, char delimiter) : _parent{message}, _delimiter{delimiter} {
 	if (_parent._raw.length() == 0) {
 		_to = 1;
