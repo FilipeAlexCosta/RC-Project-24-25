@@ -8,10 +8,11 @@
 #include <string>
 #include <initializer_list>
 
-#define DEFAULT_MSG_DELIMITER ' '
-#define DEFAULT_END_OF_MSG '\n'
+#define DEFAULT_SEP ' '
+#define DEFAULT_EOM '\n'
 #define GUESS_SIZE 4
 #define PLID_SIZE 6
+#define UDP_MSG_SIZE 128
 
 namespace net {
 enum class action_status {
@@ -44,7 +45,7 @@ struct message {
 	struct iterator {
 		using field = std::string_view;
 
-		iterator(const message& message, char delimiter);
+		iterator(const message& message, char separator);
 		iterator& operator++();
 		bool operator!=(size_t other) const;
 		bool operator==(size_t other) const;
@@ -59,9 +60,25 @@ struct message {
 	};
 
 	message(const std::string& msg);
-	iterator begin(char delimiter = DEFAULT_MSG_DELIMITER) const;
+	iterator begin(char separator = DEFAULT_SEP) const;
 	size_t end() const;
 	const std::string& data() const;
+
+	template<typename... ARGS>
+	static int prepare_buffer(char* buffer, size_t buf_sz, char sep, char eom, const ARGS&... args) {
+		const size_t len = (std::size(static_cast<const std::string_view>(args)) + ...);
+		if (len >= buf_sz)
+			return -1;
+		size_t i = 0;
+		(([buffer, sep, &args, &i]() {
+			const std::string_view arg = args;
+			std::copy(std::begin(arg), std::end(arg), buffer + i);
+			i += std::size(arg);
+			buffer[i++] = sep;
+		}()), ...);
+		buffer[len] = eom;
+		return len + 1;
+	}
 
 private:
 	std::string _raw;

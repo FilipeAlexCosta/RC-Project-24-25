@@ -39,7 +39,7 @@ std::string net::status_to_message(action_status status) {
 	return res;
 }
 
-message::iterator::iterator(const message& message, char delimiter) : _parent{message}, _delimiter{delimiter} {
+message::iterator::iterator(const message& message, char separator) : _parent{message}, _delimiter{separator} {
 	if (_parent._raw.length() == 0) {
 		_to = 1;
 		return;
@@ -84,8 +84,8 @@ bool message::iterator::is_in_delimiter_phase() const {
 
 message::message::message(const std::string& msg) : _raw{msg} {}
 
-message::iterator message::begin(char delimiter) const {
-	return iterator{*this, delimiter};
+message::iterator message::begin(char separator) const {
+	return iterator{*this, separator};
 }
 
 size_t message::end() const {

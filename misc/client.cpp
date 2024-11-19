@@ -163,7 +163,18 @@ static net::action_status do_start(const net::message& msg) {
 	if (in_game)
 		return net::action_status::ONGOING_GAME;
 
+
+	// TODO: transform max_playtime into 3 digits
+	char buffer[UDP_MSG_SIZE];
+	if (net::message::prepare_buffer(
+		buffer,
+		UDP_MSG_SIZE,
+		DEFAULT_SEP,
+		DEFAULT_EOM,
+		"SNG", plid, max_playtime 
+	) == -1); // TODO: handle error
 	// TODO: send request
+
 	setup_game_clientside(plid);
 
 	std::cout << "PLID: " << plid << '\n';
