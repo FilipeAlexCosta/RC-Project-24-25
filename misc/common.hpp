@@ -17,6 +17,7 @@
 namespace net {
 enum class action_status {
 	OK,
+	ERR,
 	UNK_ACTION,
 	MISSING_ARG,
 	EXCESS_ARGS,
@@ -41,6 +42,20 @@ ssize_t udp_write(int socket_fd, int flags, const struct sockaddr* dest_addr, so
 	return sendto(socket_fd, buffer, buf_size, flags, dest_addr, addrlen);
 }
 
+std::pair<action_status, std::vector<std::string_view>> get_fields(
+	char* buf,
+	size_t buf_sz,
+	std::initializer_list<int> field_szs,
+	char sep = DEFAULT_SEP
+);
+
+std::pair<action_status, std::vector<std::string_view>> get_fields_strict(
+	char* buf,
+	size_t buf_sz,
+	std::initializer_list<uint32_t> field_szs,
+	char sep = DEFAULT_SEP
+);
+
 struct message {
 	struct iterator {
 		using field = std::string_view;
@@ -64,21 +79,10 @@ struct message {
 	size_t end() const;
 	const std::string& data() const;
 
-	template<typename... ARGS>
-	static int prepare_buffer(char* buffer, size_t buf_sz, char sep, char eom, const ARGS&... args) {
-		const size_t len = (std::size(static_cast<const std::string_view>(args)) + ...);
-		if (len >= buf_sz)
-			return -1;
-		size_t i = 0;
-		(([buffer, sep, &args, &i]() {
-			const std::string_view arg = args;
-			std::copy(std::begin(arg), std::end(arg), buffer + i);
-			i += std::size(arg);
-			buffer[i++] = sep;
-		}()), ...);
-		buffer[len] = eom;
-		return len + 1;
-	}
+	/*template<typename... FIELDS>
+	std::pair<action_status, std::tuple<FIELDS...>> get_fields() {
+	}*/
+
 
 private:
 	std::string _raw;

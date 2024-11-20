@@ -70,7 +70,11 @@ int main() {
 	while (true) {
 		std::string input;
 		std::getline(std::cin, input);
-		auto status = actions.execute(input);
+		auto [status, fields] = net::get_fields(input.data(), input.length(), {5, 6, -1});
+		if (status == net::action_status::OK)
+			for (size_t i = 0; i < fields.size(); i++)
+				std::cout << "Field[" << i << "]: \"" << fields[i] << "\"\n";
+		//auto status = actions.execute(input);
 		if (status != net::action_status::OK)
 			std::cerr << net::status_to_message(status) << ".\n";
 		if (exit_app)
@@ -166,13 +170,13 @@ static net::action_status do_start(const net::message& msg) {
 
 	// TODO: transform max_playtime into 3 digits
 	char buffer[UDP_MSG_SIZE];
-	if (net::message::prepare_buffer(
+	/*if (net::message::prepare_buffer(
 		buffer,
 		UDP_MSG_SIZE,
 		DEFAULT_SEP,
 		DEFAULT_EOM,
 		"SNG", plid, max_playtime 
-	) == -1); // TODO: handle error
+	) == -1);*/ // TODO: handle error
 	// TODO: send request
 
 	setup_game_clientside(plid);

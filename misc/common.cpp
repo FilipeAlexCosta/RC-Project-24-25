@@ -25,6 +25,10 @@ std::string net::status_to_message(action_status status) {
 			res = "Ilegal argument for requested command";
 			break;
 
+		case action_status::ERR:
+			res = "Message did not match the expected format";
+			break;
+
 		case action_status::ONGOING_GAME:
 			res = "Requested command can only be called after finishing the current game";
 			break;
@@ -37,6 +41,61 @@ std::string net::status_to_message(action_status status) {
 			res = "Unknown error";
 	}
 	return res;
+}
+
+std::pair<action_status, std::vector<std::string_view>> net::get_fields(char* buf, size_t buf_sz, std::initializer_list<int> field_szs, char sep) {
+	std::vector<std::string_view> fields;
+	fields.reserve(std::size(field_szs));
+	size_t i = 0;
+	for (; i < buf_sz && buf[i] == sep; i++);
+	for (auto size : field_szs) {
+		if (size < 0) {
+			for (; i < buf_sz && buf[i] == sep; i++);
+			size = 1;
+			for (; (size + i) < buf_sz && buf[size + i] != sep; size++);
+		}
+		size_t next_sep = i + size;
+		if (next_sep >= buf_sz) {
+			if (next_sep != buf_sz)
+				return {net::action_status::MISSING_ARG, fields};
+			fields.push_back(std::string_view(buf + i, size));
+			i = next_sep + 1;
+			continue;
+		}
+		if (buf[next_sep] != sep)
+			return {net::action_status::BAD_ARG, fields};
+		fields.push_back(std::string_view(buf + i, size));
+		i = next_sep + 1;
+		for (; i < buf_sz && buf[i] == sep; i++);
+	}
+	if (i < buf_sz)
+		return {net::action_status::EXCESS_ARGS, fields};
+	return {net::action_status::OK, fields};
+}
+
+std::pair<action_status, std::vector<std::string_view>> net::get_fields_strict(char* buf, size_t buf_sz, std::initializer_list<uint32_t> field_szs, char sep) {
+	std::vector<std::string_view> fields;
+	fields.reserve(std::size(field_szs));
+	size_t i = 0;
+	if (buf_sz > 0 && buf[0] == sep)
+		return {net::action_status::ERR, fields};
+	for (auto size : field_szs) {
+		size_t next_sep = i + size;
+		if (next_sep >= buf_sz) {
+			if (next_sep != buf_sz)
+				return {net::action_status::MISSING_ARG, fields};
+			fields.push_back(std::string_view(buf + i, size));
+			i = next_sep + 1;
+			continue;
+		}
+		if (buf[next_sep] != sep)
+			return {net::action_status::BAD_ARG, fields};
+		fields.push_back(std::string_view(buf + i, size));
+		i = next_sep + 1;
+	}
+	if (i <= buf_sz)
+		return {net::action_status::ERR, fields};
+	return {net::action_status::OK, fields};
 }
 
 message::iterator::iterator(const message& message, char separator) : _parent{message}, _delimiter{separator} {
