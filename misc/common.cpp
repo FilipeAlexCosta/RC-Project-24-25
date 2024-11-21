@@ -1,5 +1,7 @@
 #include "common.hpp"
 
+#include <stdexcept>
+
 using namespace net;
 
 std::string net::status_to_message(action_status status) {
@@ -43,16 +45,16 @@ std::string net::status_to_message(action_status status) {
 	return res;
 }
 
-std::pair<action_status, std::vector<std::string_view>> net::get_fields(char* buf, size_t buf_sz, std::initializer_list<int> field_szs, char sep) {
-	std::vector<std::string_view> fields;
+std::pair<action_status, message> net::get_fields(const char* buf, size_t buf_sz, std::initializer_list<int> field_szs) {
+	message fields;
 	fields.reserve(std::size(field_szs));
 	size_t i = 0;
-	for (; i < buf_sz && buf[i] == sep; i++);
+	for (; i < buf_sz && std::isspace(buf[i]); i++);
 	for (auto size : field_szs) {
 		if (size < 0) {
-			for (; i < buf_sz && buf[i] == sep; i++);
+			for (; i < buf_sz && std::isspace(buf[i]); i++);
 			size = 1;
-			for (; (size + i) < buf_sz && buf[size + i] != sep; size++);
+			for (; (size + i) < buf_sz && (!std::isspace(buf[size + i])); size++);
 		}
 		size_t next_sep = i + size;
 		if (next_sep >= buf_sz) {
@@ -62,19 +64,19 @@ std::pair<action_status, std::vector<std::string_view>> net::get_fields(char* bu
 			i = next_sep + 1;
 			continue;
 		}
-		if (buf[next_sep] != sep)
+		if (!std::isspace(buf[next_sep]))
 			return {net::action_status::BAD_ARG, fields};
 		fields.push_back(std::string_view(buf + i, size));
 		i = next_sep + 1;
-		for (; i < buf_sz && buf[i] == sep; i++);
+		for (; i < buf_sz && std::isspace(buf[i]); i++);
 	}
 	if (i < buf_sz)
 		return {net::action_status::EXCESS_ARGS, fields};
 	return {net::action_status::OK, fields};
 }
 
-std::pair<action_status, std::vector<std::string_view>> net::get_fields_strict(char* buf, size_t buf_sz, std::initializer_list<uint32_t> field_szs, char sep) {
-	std::vector<std::string_view> fields;
+std::pair<action_status, message> net::get_fields_strict(const char* buf, size_t buf_sz, std::initializer_list<uint32_t> field_szs, char sep) {
+	message fields;
 	fields.reserve(std::size(field_szs));
 	size_t i = 0;
 	if (buf_sz > 0 && buf[0] == sep)
@@ -98,61 +100,47 @@ std::pair<action_status, std::vector<std::string_view>> net::get_fields_strict(c
 	return {net::action_status::OK, fields};
 }
 
-message::iterator::iterator(const message& message, char separator) : _parent{message}, _delimiter{separator} {
-	if (_parent._raw.length() == 0) {
-		_to = 1;
-		return;
+action_status net::is_valid_plid(const field& field) {
+	if (field.length() != PLID_SIZE) // PLID has 6 digits
+		return net::action_status::BAD_ARG;
+	for (char c : field)
+		if (c < '0' || c > '9')
+			return net::action_status::BAD_ARG;
+	return net::action_status::OK;
+}
+
+action_status net::is_valid_max_playtime(const field& field) {
+	if (field.length() > 3) // avoid out_of_range exception
+		return net::action_status::BAD_ARG;
+	int max_playtime = -1;
+	try {
+		max_playtime = std::stoi(std::string(field));
+	} catch (const std::invalid_argument& err) { // cannot be read
+		return net::action_status::BAD_ARG;
+	} // out_of_range exception shouldn't be an issue
+	if (max_playtime < 0 || max_playtime > 600) // check <= 600
+		return net::action_status::BAD_ARG;
+	return net::action_status::OK;
+}
+
+action_status net::is_valid_color(const field& field) {
+	if (field.length() != 1)
+		return net::action_status::BAD_ARG;
+	action_status res;
+	switch (field[0]) {
+		case 'R':
+		case 'G':
+		case 'B':
+		case 'Y':
+		case 'O':
+		case 'P':
+			res = net::action_status::OK;
+			break;
+
+		default:
+			res = net::action_status::BAD_ARG;
 	}
-	if (_parent._raw[_from] == _delimiter) {
-		for (; _to < _parent._raw.length() && _parent._raw[_to] == _delimiter; _to++);
-		_in_del_phase = true;
-		return;
-	}
-	for (; _to < _parent._raw.length() && _parent._raw[_to] != _delimiter; _to++);
-	_in_del_phase = false;
-}
-
-message::iterator& message::iterator::operator++() {
-	_from = _to;
-	_to++;
-	if (_in_del_phase) {
-		for (; _to < _parent._raw.length() && _parent._raw[_to] != _delimiter; _to++);
-		_in_del_phase = false;
-		return *this;
-	}
-	for (; _to < _parent._raw.length() && _parent._raw[_to] == _delimiter; _to++);
-	_in_del_phase = true;
-	return *this;
-}
-
-bool message::iterator::operator!=(size_t other) const {
-	return (_to - 1) != other;
-}
-
-bool message::iterator::operator==(size_t other) const {
-	return (_to - 1) == other;
-}
-
-message::iterator::field message::iterator::operator*() const {
-	return field{_parent._raw.data() + _from, _to - _from};
-}
-
-bool message::iterator::is_in_delimiter_phase() const {
-	return _in_del_phase;
-}
-
-message::message::message(const std::string& msg) : _raw{msg} {}
-
-message::iterator message::begin(char separator) const {
-	return iterator{*this, separator};
-}
-
-size_t message::end() const {
-	return _raw.size();
-}
-
-const std::string& message::data() const {
-	return _raw;
+	return res;
 }
 
 void action_map::add_action(const std::string_view& name, const action& action) {
@@ -165,17 +153,14 @@ void action_map::add_action(std::initializer_list<const std::string_view> names,
 }
 
 action_status action_map::execute(const std::string& command) const {
-	message msg{command};
-	auto field_it = msg.begin();
-	if (field_it == msg.end())
+	size_t from  = 0;
+	for (; from < command.size() && std::isspace(command[from]); from++);
+	if (from > command.size())
 		return action_status::UNK_ACTION;
-	if (field_it.is_in_delimiter_phase()) {
-		++field_it;
-		if (field_it == msg.end())
-			return action_status::UNK_ACTION;
-	}
-	auto it = _actions.find(static_cast<std::string>(*field_it));
+	size_t to = from + 1;
+	for (; to < command.size() && (!std::isspace(command[to])); to++);
+	auto it = _actions.find(std::string(std::begin(command) + from, std::begin(command) + to));
 	if (it == _actions.end())
 		return action_status::UNK_ACTION;
-	return it->second(msg);
+	return it->second(command);
 }

@@ -15,15 +15,14 @@
 static bool in_game = false;
 static bool exit_app = false;
 static char current_plid[PLID_SIZE];
-static const std::string_view valid_colors = "RGBYOP";
 
-static net::action_status do_start(const net::message& msg);
-static net::action_status do_try(const net::message& msg);
-static net::action_status do_show_trials(const net::message& msg);
-static net::action_status do_scoreboard(const net::message& msg);
-static net::action_status do_quit(const net::message& msg);
-static net::action_status do_exit(const net::message& msg);
-static net::action_status do_debug(const net::message& msg);
+static net::action_status do_start(const std::string& msg);
+static net::action_status do_try(const std::string& msg);
+static net::action_status do_show_trials(const std::string& msg);
+static net::action_status do_scoreboard(const std::string& msg);
+static net::action_status do_quit(const std::string& msg);
+static net::action_status do_exit(const std::string& msg);
+static net::action_status do_debug(const std::string& msg);
 
 int main() {
 	/*int fd, errcode;
@@ -70,11 +69,7 @@ int main() {
 	while (true) {
 		std::string input;
 		std::getline(std::cin, input);
-		auto [status, fields] = net::get_fields(input.data(), input.length(), {5, 6, -1});
-		if (status == net::action_status::OK)
-			for (size_t i = 0; i < fields.size(); i++)
-				std::cout << "Field[" << i << "]: \"" << fields[i] << "\"\n";
-		//auto status = actions.execute(input);
+		auto status = actions.execute(input);
 		if (status != net::action_status::OK)
 			std::cerr << net::status_to_message(status) << ".\n";
 		if (exit_app)
@@ -83,87 +78,25 @@ int main() {
 	return 0;
 }
 
-static bool is_valid_color(char color) {
-	for (auto v_color : valid_colors)
-		if (color == v_color)
-			return true;
-	return false;
-}
-
-static net::action_status is_valid_plid(const net::message::iterator::field& field) {
-	if (field.length() != PLID_SIZE) // PLID has 6 digits
-		return net::action_status::BAD_ARG;
-	for (char c : field)
-		if (c < '0' || c > '9')
-			return net::action_status::BAD_ARG;
-	return net::action_status::OK;
-}
-
-static net::action_status is_valid_max_playtime(const net::message::iterator::field& field) {
-	if (field.length() > 3) // avoid out_of_range exception
-		return net::action_status::BAD_ARG;
-	int max_playtime = -1;
-	try {
-		max_playtime = std::stoi(std::string(field));
-	} catch (const std::invalid_argument& err) { // cannot be read
-		return net::action_status::BAD_ARG;
-	} // out_of_range exception shouldn't be an issue
-	if (max_playtime < 0 || max_playtime > 600) // check <= 600
-		return net::action_status::BAD_ARG;
-	return net::action_status::OK;
-}
-
-static net::action_status parse_guess(const net::message& msg, net::message::iterator& field_it, char guess[GUESS_SIZE]) {
-	for (size_t i = 0; i < GUESS_SIZE - 1; i++) { 
-		auto field = *field_it;
-		guess[i] = field[0];
-		if (field.length() != 1 || !is_valid_color(field[0]))
-			return net::action_status::BAD_ARG;
-		if ((++field_it) == std::end(msg)) // go to del phase
-			return net::action_status::MISSING_ARG;
-		if ((++field_it) == std::end(msg)) // go to next color
-			return net::action_status::MISSING_ARG;
-	}
-
-	auto field = *field_it;
-	guess[GUESS_SIZE - 1] = field[0];
-	if (field.length() != 1 || !is_valid_color(field[0]))
-		return net::action_status::BAD_ARG;
-	return net::action_status::OK;
-}
-
-static void setup_game_clientside(const net::message::iterator::field& plid) {
+static void setup_game_clientside(const net::field& plid) {
 	in_game = true;
 	for (int i = 0; i < PLID_SIZE; i++)
 		current_plid[i] = plid[i];
 }
 
-static net::action_status do_start(const net::message& msg) {
-	auto field_it = std::begin(msg);
-	if (field_it.is_in_delimiter_phase()) // ignore leading whitespace
-		++field_it;
-	if ((++field_it) == std::end(msg)) // ignore "start"
-		return net::action_status::MISSING_ARG;
-	if ((++field_it) == std::end(msg)) // ignore delimiter phase
-		return net::action_status::MISSING_ARG;
-
-	auto status = is_valid_plid(*field_it);
+static net::action_status do_start(const std::string& msg) {
+	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1, PLID_SIZE, -1});
 	if (status != net::action_status::OK)
 		return status;
-	auto plid = *field_it;
-
-	if ((++field_it) == std::end(msg)) // go to del phase
-		return net::action_status::MISSING_ARG;
-	if ((++field_it) == std::end(msg)) // go to max_playtime
-		return net::action_status::MISSING_ARG;
-
-	status = is_valid_max_playtime(*field_it);
+	
+	status = net::is_valid_plid(fields[1]);
 	if (status != net::action_status::OK)
 		return status;
-	auto max_playtime = *field_it;
 
-	if ((++field_it) != std::end(msg) && (++field_it) != std::end(msg))
-		return net::action_status::EXCESS_ARGS;
+	status = net::is_valid_max_playtime(fields[2]);
+	if (status != net::action_status::OK)
+		return status;
+
 	if (in_game)
 		return net::action_status::ONGOING_GAME;
 
@@ -179,43 +112,35 @@ static net::action_status do_start(const net::message& msg) {
 	) == -1);*/ // TODO: handle error
 	// TODO: send request
 
-	setup_game_clientside(plid);
+	setup_game_clientside(fields[1]);
 
-	std::cout << "PLID: " << plid << '\n';
-	std::cout << "time: " << max_playtime << '\n';
-
+	std::cout << "PLID: " << fields[1] << '\n';
+	std::cout << "time: " << fields[2] << '\n';
 	return net::action_status::OK;
 }
 
-static net::action_status do_try(const net::message& msg) {
-	auto field_it = std::begin(msg);
-	if (field_it.is_in_delimiter_phase()) // ignore leading whitespace
-		++field_it;
-	if ((++field_it) == std::end(msg)) // ignore "try"
-		return net::action_status::MISSING_ARG;
-	if ((++field_it) == std::end(msg)) // ignore delimiter phase
-		return net::action_status::MISSING_ARG;
-
-	char guess[GUESS_SIZE];	
-	auto status = parse_guess(msg, field_it, guess);
+static net::action_status do_try(const std::string& msg) {
+	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1, 1, 1, 1, 1});
 	if (status != net::action_status::OK)
 		return status;
 
-	if ((++field_it) != std::end(msg) && (++field_it) != std::end(msg))
-		return net::action_status::EXCESS_ARGS;
+	for (size_t i = 1; i < fields.size(); i++) {
+		status = net::is_valid_color(fields[i]);
+		if (status != net::action_status::OK)
+			return status;
+	}
+
 	if (!in_game)
 		return net::action_status::NOT_IN_GAME;
 
-	std::cout << "Guess: " << guess << '\n';
+	std::cout << "Guess: " << fields[1] << fields[2] << fields[3] << fields[4] << '\n';
 	return net::action_status::OK;
 }
 
-static net::action_status do_show_trials(const net::message& msg) {
-	auto field_it = std::begin(msg);
-	if (field_it.is_in_delimiter_phase()) // ignore leading whitespace
-		++field_it;
-	if ((++field_it) != std::end(msg) && (++field_it) != std::end(msg))
-		return net::action_status::EXCESS_ARGS; // ignores keyword and trailing ws
+static net::action_status do_show_trials(const std::string& msg) {
+	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
+	if (status != net::action_status::OK)
+		return status;
 	if (!in_game)
 		return net::action_status::NOT_IN_GAME;
 	
@@ -224,83 +149,62 @@ static net::action_status do_show_trials(const net::message& msg) {
 	return net::action_status::OK;
 }
 
-static net::action_status do_scoreboard(const net::message& msg) {
-	auto field_it = std::begin(msg);
-	if (field_it.is_in_delimiter_phase()) // ignore leading whitespace
-		++field_it;
-	if ((++field_it) != std::end(msg) && (++field_it) != std::end(msg))
-		return net::action_status::EXCESS_ARGS; // ignores keyword and trailing ws
+static net::action_status do_scoreboard(const std::string& msg) {
+	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
+	if (status != net::action_status::OK)
+		return status;
 	
 	return net::action_status::OK;
 }
 
-static net::action_status do_quit(const net::message& msg) {
-	auto field_it = std::begin(msg);
-	if (field_it.is_in_delimiter_phase()) // ignore leading whitespace
-		++field_it;
-	if ((++field_it) != std::end(msg) && (++field_it) != std::end(msg))
-		return net::action_status::EXCESS_ARGS; // ignores keyword and trailing ws
+static net::action_status do_quit(const std::string& msg) {
+	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
+	if (status != net::action_status::OK)
+		return status;
+
 	if (!in_game)
 		return net::action_status::NOT_IN_GAME;
 	in_game = false;
 	return net::action_status::OK;
 }
 
-static net::action_status do_exit(const net::message& msg) {
-	auto field_it = std::begin(msg);
-	if (field_it.is_in_delimiter_phase()) // ignore leading whitespace
-		++field_it;
-	if ((++field_it) != std::end(msg) && (++field_it) != std::end(msg))
-		return net::action_status::EXCESS_ARGS; // ignores keyword and trailing ws
+static net::action_status do_exit(const std::string& msg) {
+	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
+	if (status != net::action_status::OK)
+		return status;
 	in_game = false;
 	exit_app = true;
 	return net::action_status::OK;
 }
 
-static net::action_status do_debug(const net::message& msg) {
-	auto field_it = std::begin(msg);
-	if (field_it.is_in_delimiter_phase()) // ignore leading whitespace
-		++field_it;
-	if ((++field_it) == std::end(msg)) // ignore "debug"
-		return net::action_status::MISSING_ARG;
-	if ((++field_it) == std::end(msg)) // ignore delimiter phase
-		return net::action_status::MISSING_ARG;
-	auto status = is_valid_plid(std::string(*field_it));
-	if (status != net::action_status::OK)
-		return status;
-	auto plid = *field_it;
-
-	if ((++field_it) == std::end(msg)) // go to del phase
-		return net::action_status::MISSING_ARG;
-	if ((++field_it) == std::end(msg)) // go to max_playtime
-		return net::action_status::MISSING_ARG;
-
-	status = is_valid_max_playtime(*field_it);
-	if (status != net::action_status::OK)
-		return status;
-	auto max_playtime = *field_it;
-	
-	if ((++field_it) == std::end(msg)) // go to del phase
-		return net::action_status::MISSING_ARG;
-	if ((++field_it) == std::end(msg)) // go to 1st guess
-		return net::action_status::MISSING_ARG;
-	
-	char guess[GUESS_SIZE];
-	status = parse_guess(msg, field_it, guess);
+static net::action_status do_debug(const std::string& msg) {
+	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1, PLID_SIZE, -1, 1, 1, 1, 1});
 	if (status != net::action_status::OK)
 		return status;
 
-	if ((++field_it) != std::end(msg) && (++field_it) != std::end(msg))
-		return net::action_status::EXCESS_ARGS;
+	status = net::is_valid_plid(fields[1]);
+	if (status != net::action_status::OK)
+		return status;
+
+	status = net::is_valid_max_playtime(fields[2]);
+	if (status != net::action_status::OK)
+		return status;
+
+	for (size_t i = 3; i < fields.size(); i++) {
+		status = net::is_valid_color(fields[i]);
+		if (status != net::action_status::OK)
+			return status;
+	}
+
 	if (in_game)
 		return net::action_status::ONGOING_GAME;
 
 	// TODO: send request
-	setup_game_clientside(plid);
+	setup_game_clientside(fields[1]);
 
-	std::cout << "PLID: " << plid << '\n';
-	std::cout << "time: " << max_playtime << '\n';
-	std::cout << "Guess: " << guess << '\n';
+	std::cout << "PLID: " << fields[1] << '\n';
+	std::cout << "time: " << fields[2] << '\n';
+	std::cout << "Guess: " << fields[1] << fields[2] << fields[3] << fields[4] << '\n';
 	
 	return net::action_status::OK;
 }

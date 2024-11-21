@@ -10,7 +10,6 @@
 
 #define DEFAULT_SEP ' '
 #define DEFAULT_EOM '\n'
-#define GUESS_SIZE 4
 #define PLID_SIZE 6
 #define UDP_MSG_SIZE 128
 
@@ -25,6 +24,9 @@ enum class action_status {
 	ONGOING_GAME,
 	NOT_IN_GAME
 };
+
+using field = std::string_view;
+using message = std::vector<field>;
 
 std::string status_to_message(action_status status);
 
@@ -42,54 +44,27 @@ ssize_t udp_write(int socket_fd, int flags, const struct sockaddr* dest_addr, so
 	return sendto(socket_fd, buffer, buf_size, flags, dest_addr, addrlen);
 }
 
-std::pair<action_status, std::vector<std::string_view>> get_fields(
-	char* buf,
+std::pair<action_status, message> get_fields(
+	const char* buf,
 	size_t buf_sz,
-	std::initializer_list<int> field_szs,
-	char sep = DEFAULT_SEP
+	std::initializer_list<int> field_szs
 );
 
-std::pair<action_status, std::vector<std::string_view>> get_fields_strict(
-	char* buf,
+std::pair<action_status, message> get_fields_strict(
+	const char* buf,
 	size_t buf_sz,
 	std::initializer_list<uint32_t> field_szs,
 	char sep = DEFAULT_SEP
 );
 
-struct message {
-	struct iterator {
-		using field = std::string_view;
+action_status is_valid_plid(const field& field);
 
-		iterator(const message& message, char separator);
-		iterator& operator++();
-		bool operator!=(size_t other) const;
-		bool operator==(size_t other) const;
-		field operator*() const;
-		bool is_in_delimiter_phase() const;
+action_status is_valid_max_playtime(const field& field);
 
-	private:
-		const message& _parent;
-		size_t _from = 0, _to = 0;
-		char _delimiter;
-		bool _in_del_phase;
-	};
-
-	message(const std::string& msg);
-	iterator begin(char separator = DEFAULT_SEP) const;
-	size_t end() const;
-	const std::string& data() const;
-
-	/*template<typename... FIELDS>
-	std::pair<action_status, std::tuple<FIELDS...>> get_fields() {
-	}*/
-
-
-private:
-	std::string _raw;
-};
+action_status is_valid_color(const field& field);
 
 struct action_map {
-	using action = std::function<action_status(const message&)>;
+	using action = std::function<action_status(const std::string&)>;
 	void add_action(const std::string_view& name, const action& action);
 	void add_action(std::initializer_list<const std::string_view> names, const action& action);
 	action_status execute(const std::string& command) const;
