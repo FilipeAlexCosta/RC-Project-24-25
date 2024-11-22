@@ -38,6 +38,15 @@ std::string net::status_to_message(action_status status) {
 		case action_status::NOT_IN_GAME:
 			res = "Requested command can only be called after starting a game";
 			break;
+		case action_status::SEND_ERR:
+			res = "Failed to send message to the server. Please check the server address and port, or try again later";
+			break;
+		case action_status::CONN_TIMEOUT:
+			res = "Maximum number of timeouts of 5s reached. The request couldn't be completed";
+			break;
+		case action_status::RECV_ERR:
+			res = "Failed to receive a response from the server"; 
+			break;
 
 		default:
 			res = "Unknown error";

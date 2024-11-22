@@ -7,7 +7,7 @@
 #include <netdb.h>
 #include <string.h>
 
-#define PORT "58001"
+#define PORT "58011"
 
 /* signal(SIGPIPE, SIG_IGN)
  * signal(SIGCHILD, SIG_IGN) ignorar estes 2 sinais

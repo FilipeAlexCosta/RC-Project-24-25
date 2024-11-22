@@ -30,7 +30,10 @@ enum class action_status {
 	EXCESS_ARGS,
 	BAD_ARG,
 	ONGOING_GAME,
-	NOT_IN_GAME
+	NOT_IN_GAME,
+	SEND_ERR,
+	CONN_TIMEOUT,
+	RECV_ERR,
 };
 
 using field = std::string_view;
