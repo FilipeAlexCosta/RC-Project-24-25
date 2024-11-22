@@ -100,6 +100,24 @@ std::pair<action_status, message> net::get_fields_strict(const char* buf, size_t
 	return {net::action_status::OK, fields};
 }
 
+int net::prepare_buffer(char* buf, int buf_sz, message msg, char sep, char eom) {
+	uint32_t i = 0;
+	size_t fld_i = 0;
+	for (; fld_i < msg.size() - 1; fld_i++) {
+		if (i + std::size(msg[fld_i]) >= buf_sz)
+			return - 1;
+		for (char c : msg[fld_i])
+			buf[i++] = c;
+		buf[i++] = sep;
+	}
+	if (std::size(msg) != 0 && i + std::size(msg[fld_i]) >= buf_sz)
+		return - 1;
+	for (char c : msg[fld_i])
+		buf[i++] = c;
+	buf[i++] = eom;
+	return i;
+}
+
 action_status net::is_valid_plid(const field& field) {
 	if (field.length() != PLID_SIZE) // PLID has 6 digits
 		return net::action_status::BAD_ARG;
@@ -121,6 +139,14 @@ action_status net::is_valid_max_playtime(const field& field) {
 	if (max_playtime < 0 || max_playtime > 600) // check <= 600
 		return net::action_status::BAD_ARG;
 	return net::action_status::OK;
+}
+
+void net::fill_max_playtime(char res[MAX_PLAYTIME_SIZE], const field& max_playtime) {
+	int res_i = MAX_PLAYTIME_SIZE - 1;
+	for (int i = std::size(max_playtime) - 1; i > -1; i--, res_i--)
+		res[res_i] = max_playtime[i];
+	for (; res_i > -1; res_i--)
+		res[res_i] = '0';
 }
 
 action_status net::is_valid_color(const field& field) {

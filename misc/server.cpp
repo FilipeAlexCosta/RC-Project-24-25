@@ -9,6 +9,20 @@
 
 #define PORT "58001"
 
+/* signal(SIGPIPE, SIG_IGN)
+ * signal(SIGCHILD, SIG_IGN) ignorar estes 2 sinais
+ *
+ * select() -> bloqueia na chamada enquanto espera por msgs udp/tcp
+ * setsockopt() -> coloca um temporizador na socket (util para UDP)
+ *
+ * while (n < MAX_RESEND) {
+ * 	int ret = recvfrom(...)
+ * 	if (ret < 0)
+ * 		if (errno == EWOULDBLOCK || errno == EAGAIN)
+ * 			timeout => Resend message
+ * }
+ */
+
 int main() {
 	int fd, errcode;
 	ssize_t n;

@@ -15,6 +15,7 @@
 static bool in_game = false;
 static bool exit_app = false;
 static char current_plid[PLID_SIZE];
+static char current_trial = '0';
 
 static net::action_status do_start(const std::string& msg);
 static net::action_status do_try(const std::string& msg);
@@ -80,6 +81,7 @@ int main() {
 
 static void setup_game_clientside(const net::field& plid) {
 	in_game = true;
+	current_trial = '0';
 	for (int i = 0; i < PLID_SIZE; i++)
 		current_plid[i] = plid[i];
 }
@@ -100,9 +102,14 @@ static net::action_status do_start(const std::string& msg) {
 	if (in_game)
 		return net::action_status::ONGOING_GAME;
 
+	char sent_m_time[MAX_PLAYTIME_SIZE];
+	net::fill_max_playtime(sent_m_time, fields[2]);
+	fields[0] = "SNG";
+	fields[2] = net::field(sent_m_time, MAX_PLAYTIME_SIZE);
 
 	// TODO: transform max_playtime into 3 digits
 	char buffer[UDP_MSG_SIZE];
+	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
 	/*if (net::message::prepare_buffer(
 		buffer,
 		UDP_MSG_SIZE,
@@ -116,6 +123,7 @@ static net::action_status do_start(const std::string& msg) {
 
 	std::cout << "PLID: " << fields[1] << '\n';
 	std::cout << "time: " << fields[2] << '\n';
+	std::cout << "Sent buffer: \"" << buffer << "\"\n";
 	return net::action_status::OK;
 }
 
@@ -132,8 +140,18 @@ static net::action_status do_try(const std::string& msg) {
 
 	if (!in_game)
 		return net::action_status::NOT_IN_GAME;
+	current_trial++;
+
+	fields[0] = "TRY";
+	fields.insert(std::begin(fields) + 1, current_plid);
+	fields.push_back(net::field(&current_trial, 1));
+
+
+	char buffer[UDP_MSG_SIZE];
+	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
 
 	std::cout << "Guess: " << fields[1] << fields[2] << fields[3] << fields[4] << '\n';
+	std::cout << "Sent buffer: \"" << buffer << "\"\n";
 	return net::action_status::OK;
 }
 
@@ -145,6 +163,13 @@ static net::action_status do_show_trials(const std::string& msg) {
 		return net::action_status::NOT_IN_GAME;
 	
 	// use PLID ...
+
+	fields[0] = "STR";
+	fields.push_back(current_plid);
+	char buffer[UDP_MSG_SIZE];
+	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+
+	std::cout << "Sent buffer: \"" << buffer << "\"\n";
 	
 	return net::action_status::OK;
 }
@@ -153,6 +178,12 @@ static net::action_status do_scoreboard(const std::string& msg) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
 	if (status != net::action_status::OK)
 		return status;
+
+	fields[0] = "SSB";
+	char buffer[UDP_MSG_SIZE];
+	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+
+	std::cout << "Sent buffer: \"" << buffer << "\"\n";
 	
 	return net::action_status::OK;
 }
@@ -164,6 +195,14 @@ static net::action_status do_quit(const std::string& msg) {
 
 	if (!in_game)
 		return net::action_status::NOT_IN_GAME;
+
+	fields[0] = "QUT";
+	fields.push_back(current_plid);
+	char buffer[UDP_MSG_SIZE];
+	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+
+	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+
 	in_game = false;
 	return net::action_status::OK;
 }
@@ -172,6 +211,19 @@ static net::action_status do_exit(const std::string& msg) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
 	if (status != net::action_status::OK)
 		return status;
+
+	if (!in_game) {
+		exit_app = true;
+		return net::action_status::OK;
+	}
+
+	fields[0] = "QUT";
+	fields.push_back(current_plid);
+	char buffer[UDP_MSG_SIZE];
+	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+
+	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+
 	in_game = false;
 	exit_app = true;
 	return net::action_status::OK;
@@ -199,12 +251,22 @@ static net::action_status do_debug(const std::string& msg) {
 	if (in_game)
 		return net::action_status::ONGOING_GAME;
 
+	char sent_m_time[MAX_PLAYTIME_SIZE];
+	net::fill_max_playtime(sent_m_time, fields[2]);
+	fields[0] = "SNG";
+	fields[2] = net::field(sent_m_time, MAX_PLAYTIME_SIZE);
+
+	char buffer[UDP_MSG_SIZE];
+	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+
 	// TODO: send request
 	setup_game_clientside(fields[1]);
+
 
 	std::cout << "PLID: " << fields[1] << '\n';
 	std::cout << "time: " << fields[2] << '\n';
 	std::cout << "Guess: " << fields[1] << fields[2] << fields[3] << fields[4] << '\n';
+	std::cout << "Sent buffer: \"" << buffer << "\"\n";
 	
 	return net::action_status::OK;
 }

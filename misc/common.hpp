@@ -11,6 +11,7 @@
 #define DEFAULT_SEP ' '
 #define DEFAULT_EOM '\n'
 #define PLID_SIZE 6
+#define MAX_PLAYTIME_SIZE 3
 #define UDP_MSG_SIZE 128
 
 namespace net {
@@ -57,11 +58,15 @@ std::pair<action_status, message> get_fields_strict(
 	char sep = DEFAULT_SEP
 );
 
+int prepare_buffer(char* buf, int buf_sz, message msg, char sep = DEFAULT_SEP, char eom = DEFAULT_EOM);
+
 action_status is_valid_plid(const field& field);
 
 action_status is_valid_max_playtime(const field& field);
 
 action_status is_valid_color(const field& field);
+
+void fill_max_playtime(char res[MAX_PLAYTIME_SIZE], const field& max_playtime);
 
 struct action_map {
 	using action = std::function<action_status(const std::string&)>;
