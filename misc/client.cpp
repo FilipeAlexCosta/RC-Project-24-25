@@ -1,17 +1,8 @@
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-
 #include "common.hpp"
 #include <iostream>
 #include <cstring>
 
 #define PORT "58011"
-#define MAX_RESEND 3 //TODO: change number
 
 static bool in_game = false;
 static bool exit_app = false;
@@ -50,6 +41,12 @@ int main() {
 		&addr,
 		&addrlen
 	};
+
+	struct timeval timeout;
+	timeout.tv_sec = 5; // 5 s timeout
+	timeout.tv_usec = 0;
+	if(setsockopt(udp_info.socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1)
+		return 1;
 
 	/*if ((n = sendto(fd, "Hello!\n", 7, 0, res->ai_addr, res->ai_addrlen)) == -1)
 		return 1;
@@ -94,34 +91,6 @@ static void setup_game_clientside(const net::field& plid) {
 		current_plid[i] = plid[i];
 }
 
-static net::action_status send_udp_msg(const char* msg, int msg_size, net::socket_context& udp_info) {
-	int n;
-	struct timeval timeout;
-	timeout.tv_sec = 5; // 5 s timeout
-	timeout.tv_usec = 0;
-	int retries = 0;
-	char received_msg[128];
-	
-	while (retries < MAX_RESEND) {
-		if(setsockopt(udp_info.socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1)
-			return net::action_status::SEND_ERR; // TODO: error setting timeout, do something ...
-		if ((n = sendto(udp_info.socket_fd, msg, msg_size, 0, udp_info.receiver_info->ai_addr, udp_info.receiver_info->ai_addrlen)) == -1)
-			return net::action_status::SEND_ERR;
-		if ((n = recvfrom(udp_info.socket_fd, (void *) received_msg, sizeof(received_msg), 0, (struct sockaddr*) udp_info.sender_addr, udp_info.sender_addr_len)) == -1) {
-			if(errno == EWOULDBLOCK || errno == EAGAIN) {
-				//timeout occured
-				std::cout << "Received timeout. Retrying to communicate with the server...\n";
-				retries++;
-			}	else
-				return net::action_status::RECV_ERR;
-		} else {
-			std::cout << "Received buffer: \"" << received_msg << "\"";
-			return net::action_status::OK;
-		}
-	}
-	return net::action_status::CONN_TIMEOUT;
-}
-
 static net::action_status do_start(const std::string& msg, net::socket_context& udp_info) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1, PLID_SIZE, -1});
 	if (status != net::action_status::OK)
@@ -143,29 +112,20 @@ static net::action_status do_start(const std::string& msg, net::socket_context& 
 	fields[0] = "SNG";
 	fields[2] = net::field(sent_m_time, MAX_PLAYTIME_SIZE);
 
-	// TODO: transform max_playtime into 3 digits
-	char buffer[UDP_MSG_SIZE];
-	int n_bytes = net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
-	/*if (net::message::prepare_buffer(
-		buffer,
-		UDP_MSG_SIZE,
-		DEFAULT_SEP,
-		DEFAULT_EOM,
-		"SNG", plid, max_playtime 
-	) == -1);*/ // TODO: handle error
-	// TODO: send request
+	char req_buf[UDP_MSG_SIZE];
+	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+	std::cout << "Sent buffer: \"" << req_buf << '\"';
 
-	status = send_udp_msg(buffer, n_bytes, udp_info);
-	if (status != net::action_status::OK) {
+	char ans_buf[UDP_MSG_SIZE];
+	int ans_bytes = -1;
+	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
+	if (status != net::action_status::OK)
 		return status;
-	}
 	
 	setup_game_clientside(fields[1]);
 
-	// std::cout << "PLID: " << fields[1] << '\n';
-	// std::cout << "time: " << fields[2] << '\n';
+	std::cout << "Received buffer: \"" << ans_buf << '\"';
 	return net::action_status::OK;
 }
 
@@ -188,16 +148,18 @@ static net::action_status do_try(const std::string& msg, net::socket_context& ud
 	fields.insert(std::begin(fields) + 1, current_plid);
 	fields.push_back(net::field(&current_trial, 1));
 
-	char buffer[UDP_MSG_SIZE];
-	int n_bytes = net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+	char req_buf[UDP_MSG_SIZE];
+	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	//std::cout << "Guess: " << fields[1] << fields[2] << fields[3] << fields[4] << fields[5] << '\n';
-	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+	std::cout << "Sent buffer: \"" << req_buf << '\"';
 
-	status = send_udp_msg(buffer, n_bytes, udp_info);
-	if (status != net::action_status::OK) {
+	char ans_buf[UDP_MSG_SIZE];
+	int ans_bytes = -1;
+	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
+	if (status != net::action_status::OK)
 		return status;
-	}
+	
+	std::cout << "Received buffer: \"" << ans_buf << '\"';
 	return net::action_status::OK;
 }
 
@@ -210,11 +172,19 @@ static net::action_status do_show_trials(const std::string& msg, net::socket_con
 		
 	fields[0] = "STR";
 	fields.push_back(current_plid);
-	char buffer[UDP_MSG_SIZE];
-	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+	char req_buf[UDP_MSG_SIZE];
+	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
+
+	std::cout << "Sent buffer: \"" << req_buf << '\"';
+
+	char ans_buf[UDP_MSG_SIZE];
+	int ans_bytes = -1;
+	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
+	if (status != net::action_status::OK)
+		return status;
 	
+	std::cout << "Received buffer: \"" << ans_buf << '\"';
 	return net::action_status::OK;
 }
 
@@ -224,11 +194,19 @@ static net::action_status do_scoreboard(const std::string& msg, net::socket_cont
 		return status;
 
 	fields[0] = "SSB";
-	char buffer[UDP_MSG_SIZE];
-	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+	char req_buf[UDP_MSG_SIZE];
+	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
+
+	std::cout << "Sent buffer: \"" << req_buf << '\"';
+
+	char ans_buf[UDP_MSG_SIZE];
+	int ans_bytes = -1;
+	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
+	if (status != net::action_status::OK)
+		return status;
 	
+	std::cout << "Received buffer: \"" << ans_buf << '\"';
 	return net::action_status::OK;
 }
 
@@ -242,15 +220,19 @@ static net::action_status do_quit(const std::string& msg, net::socket_context& u
 
 	fields[0] = "QUT";
 	fields.push_back(current_plid);
-	char buffer[UDP_MSG_SIZE];
-	int n_bytes = net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+	char req_buf[UDP_MSG_SIZE];
+	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	status = send_udp_msg(buffer, n_bytes, udp_info);
-	if (status != net::action_status::OK) {
+	std::cout << "Sent buffer: \"" << req_buf << '\"';
+
+	char ans_buf[UDP_MSG_SIZE];
+	int ans_bytes = -1;
+	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
+	if (status != net::action_status::OK)
 		return status;
-	}
+	
+	std::cout << "Received buffer: \"" << ans_buf << '\"';
 
 	in_game = false;
 	return net::action_status::OK;
@@ -268,15 +250,19 @@ static net::action_status do_exit(const std::string& msg, net::socket_context& u
 
 	fields[0] = "QUT";
 	fields.push_back(current_plid);
-	char buffer[UDP_MSG_SIZE];
-	int n_bytes = net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+	char req_buf[UDP_MSG_SIZE];
+	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	status = send_udp_msg(buffer, n_bytes, udp_info);
-	if (status != net::action_status::OK) {
+	std::cout << "Sent buffer: \"" << req_buf << '\"';
+
+	char ans_buf[UDP_MSG_SIZE];
+	int ans_bytes = -1;
+	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
+	if (status != net::action_status::OK)
 		return status;
-	}
+	
+	std::cout << "Received buffer: \"" << ans_buf << '\"';
 
 	in_game = false;
 	exit_app = true;
@@ -310,20 +296,20 @@ static net::action_status do_debug(const std::string& msg, net::socket_context& 
 	fields[0] = "DBG";
 	fields[2] = net::field(sent_m_time, MAX_PLAYTIME_SIZE);
 
-	char buffer[UDP_MSG_SIZE];
-	int n_bytes = net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+	char req_buf[UDP_MSG_SIZE];
+	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	// std::cout << "PLID: " << fields[1] << '\n';
-	// std::cout << "time: " << fields[2] << '\n';
-	// std::cout << "Guess: " << fields[1] << fields[2] << fields[3] << fields[4] << '\n';
-	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+	std::cout << "Sent buffer: \"" << req_buf << '\"';
 
-	status = send_udp_msg(buffer, n_bytes, udp_info);
-	if (status != net::action_status::OK) {
+	char ans_buf[UDP_MSG_SIZE];
+	int ans_bytes = -1;
+	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
+	if (status != net::action_status::OK)
 		return status;
-	}
+	
+	setup_game_clientside(fields[1]);
 
-	setup_game_clientside(fields[1]);	
+	std::cout << "Received buffer: \"" << ans_buf << '\"';
 	return net::action_status::OK;
 }
 

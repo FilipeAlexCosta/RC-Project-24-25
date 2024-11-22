@@ -54,6 +54,20 @@ std::string net::status_to_message(action_status status) {
 	return res;
 }
 
+action_status net::udp_request(const char* req, uint32_t req_sz, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read) {
+	for (int retries = 0; retries < MAX_RESEND; retries++) {
+		read = sendto(udp_info.socket_fd, req, req_sz, 0, udp_info.receiver_info->ai_addr, udp_info.receiver_info->ai_addrlen);
+		if (read == -1)
+			return net::action_status::SEND_ERR;
+		read = recvfrom(udp_info.socket_fd, ans, ans_sz, 0, (struct sockaddr*) udp_info.sender_addr, udp_info.sender_addr_len);
+		if (read >= 0)
+			return net::action_status::OK;
+		if (errno != EWOULDBLOCK && errno != EAGAIN)
+			return net::action_status::RECV_ERR;
+	}
+	return net::action_status::CONN_TIMEOUT;
+}
+
 std::pair<action_status, message> net::get_fields(const char* buf, size_t buf_sz, std::initializer_list<int> field_szs) {
 	message fields;
 	fields.reserve(std::size(field_szs));

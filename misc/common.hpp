@@ -1,8 +1,14 @@
 #ifndef _COMMON_HPP_
 #define _COMMON_HPP_
 
+#include <unistd.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+
 #include <unordered_map>
 #include <functional>
 #include <string>
@@ -13,6 +19,7 @@
 #define PLID_SIZE 6
 #define MAX_PLAYTIME_SIZE 3
 #define UDP_MSG_SIZE 128
+#define MAX_RESEND 3
 
 namespace net {
 typedef struct socket_context {
@@ -40,6 +47,8 @@ using field = std::string_view;
 using message = std::vector<field>;
 
 std::string status_to_message(action_status status);
+
+action_status udp_request(const char* req, uint32_t req_sz, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read);
 
 std::pair<action_status, message> get_fields(
 	const char* buf,
