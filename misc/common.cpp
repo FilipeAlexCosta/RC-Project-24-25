@@ -178,7 +178,7 @@ void action_map::add_action(std::initializer_list<const std::string_view> names,
 		add_action(name, action);
 }
 
-action_status action_map::execute(const std::string& command) const {
+action_status action_map::execute(const std::string& command, socket_context& socket_info) const {
 	size_t from  = 0;
 	for (; from < command.size() && std::isspace(command[from]); from++);
 	if (from > command.size())
@@ -188,5 +188,5 @@ action_status action_map::execute(const std::string& command) const {
 	auto it = _actions.find(std::string(std::begin(command) + from, std::begin(command) + to));
 	if (it == _actions.end())
 		return action_status::UNK_ACTION;
-	return it->second(command);
+	return it->second(command, socket_info);
 }

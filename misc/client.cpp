@@ -10,23 +10,23 @@
 #include <iostream>
 #include <cstring>
 
-#define PORT "58001"
+#define PORT "58011"
 
 static bool in_game = false;
 static bool exit_app = false;
 static char current_plid[PLID_SIZE];
 static char current_trial = '0';
 
-static net::action_status do_start(const std::string& msg);
-static net::action_status do_try(const std::string& msg);
-static net::action_status do_show_trials(const std::string& msg);
-static net::action_status do_scoreboard(const std::string& msg);
-static net::action_status do_quit(const std::string& msg);
-static net::action_status do_exit(const std::string& msg);
-static net::action_status do_debug(const std::string& msg);
+static net::action_status do_start(const std::string& msg, net::socket_context& udp_info);
+static net::action_status do_try(const std::string& msg, net::socket_context& udp_info);
+static net::action_status do_show_trials(const std::string& msg, net::socket_context& udp_info);
+static net::action_status do_scoreboard(const std::string& msg, net::socket_context& udp_info);
+static net::action_status do_quit(const std::string& msg, net::socket_context& udp_info);
+static net::action_status do_exit(const std::string& msg, net::socket_context& udp_info);
+static net::action_status do_debug(const std::string& msg, net::socket_context& udp_info);
 
 int main() {
-	/*int fd, errcode;
+	int fd, errcode;
 	ssize_t n;
 	struct addrinfo hints, *res;
 	struct sockaddr_in addr;
@@ -40,10 +40,17 @@ int main() {
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
 
-	if ((errcode = getaddrinfo("localhost", PORT, &hints, &res)) != 0)
+	if ((errcode = getaddrinfo("tejo.tecnico.ulisboa.pt", PORT, &hints, &res)) != 0)
 		return 1;
 
-	if ((n = sendto(fd, "Hello!\n", 7, 0, res->ai_addr, res->ai_addrlen)) == -1)
+	net::socket_context udp_info{
+		fd,
+		res,
+		&addr,
+		&addrlen
+	};
+
+	/*if ((n = sendto(fd, "Hello!\n", 7, 0, res->ai_addr, res->ai_addrlen)) == -1)
 		return 1;
 	if ((n = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*) &addr, &addrlen)) == -1)
 		return 1;
@@ -70,7 +77,7 @@ int main() {
 	while (true) {
 		std::string input;
 		std::getline(std::cin, input);
-		auto status = actions.execute(input);
+		auto status = actions.execute(input, udp_info);
 		if (status != net::action_status::OK)
 			std::cerr << net::status_to_message(status) << ".\n";
 		if (exit_app)
@@ -86,7 +93,7 @@ static void setup_game_clientside(const net::field& plid) {
 		current_plid[i] = plid[i];
 }
 
-static net::action_status do_start(const std::string& msg) {
+static net::action_status do_start(const std::string& msg, net::socket_context& udp_info) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1, PLID_SIZE, -1});
 	if (status != net::action_status::OK)
 		return status;
@@ -109,7 +116,7 @@ static net::action_status do_start(const std::string& msg) {
 
 	// TODO: transform max_playtime into 3 digits
 	char buffer[UDP_MSG_SIZE];
-	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+	int n_bytes = net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
 	/*if (net::message::prepare_buffer(
 		buffer,
 		UDP_MSG_SIZE,
@@ -119,15 +126,23 @@ static net::action_status do_start(const std::string& msg) {
 	) == -1);*/ // TODO: handle error
 	// TODO: send request
 
+	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+
+	int n;
+	if ((n = sendto(udp_info.socket_fd, buffer, n_bytes, 0, udp_info.receiver_info->ai_addr, udp_info.receiver_info->ai_addrlen)) == -1)
+		return net::action_status::ERR;
+	if ((n = recvfrom(udp_info.socket_fd, buffer, sizeof(buffer), 0, (struct sockaddr*) udp_info.sender_addr, udp_info.sender_addr_len)) == -1)
+		return net::action_status::ERR;
+
 	setup_game_clientside(fields[1]);
 
 	std::cout << "PLID: " << fields[1] << '\n';
 	std::cout << "time: " << fields[2] << '\n';
-	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+	std::cout << "Received buffer: \"" << buffer << "\"\n";
 	return net::action_status::OK;
 }
 
-static net::action_status do_try(const std::string& msg) {
+static net::action_status do_try(const std::string& msg, net::socket_context& udp_info) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1, 1, 1, 1, 1});
 	if (status != net::action_status::OK)
 		return status;
@@ -155,7 +170,7 @@ static net::action_status do_try(const std::string& msg) {
 	return net::action_status::OK;
 }
 
-static net::action_status do_show_trials(const std::string& msg) {
+static net::action_status do_show_trials(const std::string& msg, net::socket_context& udp_info) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
 	if (status != net::action_status::OK)
 		return status;
@@ -174,7 +189,7 @@ static net::action_status do_show_trials(const std::string& msg) {
 	return net::action_status::OK;
 }
 
-static net::action_status do_scoreboard(const std::string& msg) {
+static net::action_status do_scoreboard(const std::string& msg, net::socket_context& udp_info) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
 	if (status != net::action_status::OK)
 		return status;
@@ -188,7 +203,7 @@ static net::action_status do_scoreboard(const std::string& msg) {
 	return net::action_status::OK;
 }
 
-static net::action_status do_quit(const std::string& msg) {
+static net::action_status do_quit(const std::string& msg, net::socket_context& udp_info) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
 	if (status != net::action_status::OK)
 		return status;
@@ -199,15 +214,21 @@ static net::action_status do_quit(const std::string& msg) {
 	fields[0] = "QUT";
 	fields.push_back(current_plid);
 	char buffer[UDP_MSG_SIZE];
-	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+	int n_bytes = net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
 
 	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+
+	int n;
+	if ((n = sendto(udp_info.socket_fd, buffer, n_bytes, 0, udp_info.receiver_info->ai_addr, udp_info.receiver_info->ai_addrlen)) == -1)
+		return net::action_status::ERR;
+	if ((n = recvfrom(udp_info.socket_fd, buffer, sizeof(buffer), 0, (struct sockaddr*) udp_info.sender_addr, udp_info.sender_addr_len)) == -1)
+		return net::action_status::ERR;
 
 	in_game = false;
 	return net::action_status::OK;
 }
 
-static net::action_status do_exit(const std::string& msg) {
+static net::action_status do_exit(const std::string& msg, net::socket_context& udp_info) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
 	if (status != net::action_status::OK)
 		return status;
@@ -220,16 +241,22 @@ static net::action_status do_exit(const std::string& msg) {
 	fields[0] = "QUT";
 	fields.push_back(current_plid);
 	char buffer[UDP_MSG_SIZE];
-	net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
+	int n_bytes = net::prepare_buffer(buffer, (sizeof(buffer) / sizeof(char)), fields);
 
 	std::cout << "Sent buffer: \"" << buffer << "\"\n";
+
+	int n;
+	if ((n = sendto(udp_info.socket_fd, buffer, n_bytes, 0, udp_info.receiver_info->ai_addr, udp_info.receiver_info->ai_addrlen)) == -1)
+		return net::action_status::ERR;
+	if ((n = recvfrom(udp_info.socket_fd, buffer, sizeof(buffer), 0, (struct sockaddr*) udp_info.sender_addr, udp_info.sender_addr_len)) == -1)
+		return net::action_status::ERR;
 
 	in_game = false;
 	exit_app = true;
 	return net::action_status::OK;
 }
 
-static net::action_status do_debug(const std::string& msg) {
+static net::action_status do_debug(const std::string& msg, net::socket_context& udp_info) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1, PLID_SIZE, -1, 1, 1, 1, 1});
 	if (status != net::action_status::OK)
 		return status;

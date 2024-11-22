@@ -15,6 +15,13 @@
 #define UDP_MSG_SIZE 128
 
 namespace net {
+typedef struct socket_context {
+	int socket_fd;
+	const struct addrinfo* receiver_info;
+	struct sockaddr_in* sender_addr;
+	socklen_t* sender_addr_len;
+} socket_context;
+
 enum class action_status {
 	OK,
 	ERR,
@@ -30,20 +37,6 @@ using field = std::string_view;
 using message = std::vector<field>;
 
 std::string status_to_message(action_status status);
-
-template<typename... Ts>
-ssize_t udp_write(int socket_fd, int flags, const struct sockaddr* dest_addr, socklen_t addrlen, Ts... args) {
-	static_assert(sizeof...(Ts) > 0, "udp_write: must write at least one argument");
-	constexpr size_t buf_size = (sizeof(args) + ...);
-	static_assert(buf_size > 0, "udp_write: must write at least one byte");
-	char buffer[buf_size];
-	size_t start = 0;
-	(([&buffer, &start, &args]() {
-		memcpy(buffer + start, (char*) &args, sizeof(args));
-		start += sizeof(args);
-	}()), ...);
-	return sendto(socket_fd, buffer, buf_size, flags, dest_addr, addrlen);
-}
 
 std::pair<action_status, message> get_fields(
 	const char* buf,
@@ -69,10 +62,10 @@ action_status is_valid_color(const field& field);
 void fill_max_playtime(char res[MAX_PLAYTIME_SIZE], const field& max_playtime);
 
 struct action_map {
-	using action = std::function<action_status(const std::string&)>;
+	using action = std::function<action_status(const std::string&, socket_context& socket_info)>;
 	void add_action(const std::string_view& name, const action& action);
 	void add_action(std::initializer_list<const std::string_view> names, const action& action);
-	action_status execute(const std::string& command) const;
+	action_status execute(const std::string& command, socket_context& socket_info) const;
 private:
 	std::unordered_map<std::string, action> _actions;
 };
