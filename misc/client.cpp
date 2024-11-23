@@ -75,8 +75,10 @@ int main() {
 		auto status = actions.execute(input, udp_info);
 		if (status != net::action_status::OK)
 			std::cerr << net::status_to_message(status) << ".\n";
-		if (exit_app)
+		if (exit_app) {
+			std::cout << "Exiting the Player application...\n";
 			return 0; // TODO: maybe do the actual closing down
+		}
 	}
 
 	return 0;
@@ -113,7 +115,7 @@ static net::action_status do_start(const std::string& msg, net::socket_context& 
 	char req_buf[UDP_MSG_SIZE];
 	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << req_buf << '\"';
+	//std::cout << "Sent buffer: \"" << req_buf << '\"';
 
 	char ans_buf[UDP_MSG_SIZE];
 	int ans_bytes = -1;
@@ -131,7 +133,7 @@ static net::action_status do_start(const std::string& msg, net::socket_context& 
 	if (res.first != net::action_status::OK)
 		return res.first;
 
-	std::cout << "Received buffer: \"" << ans_buf << '\"';
+	//std::cout << "Received buffer: \"" << ans_buf;
 
 	if (res.second[0] != "RSG")
 		return net::action_status::UNK_REPLY;
@@ -172,7 +174,7 @@ static net::action_status do_try(const std::string& msg, net::socket_context& ud
 	char req_buf[UDP_MSG_SIZE];
 	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << req_buf << '\"';
+	//std::cout << "Sent buffer: \"" << req_buf << '\"';
 
 	char ans_buf[UDP_MSG_SIZE];
 	int ans_bytes = -1;
@@ -180,8 +182,98 @@ static net::action_status do_try(const std::string& msg, net::socket_context& ud
 	if (status != net::action_status::OK)
 		return status;
 	
-	std::cout << "Received buffer: \"" << ans_buf << '\"';
-	return net::action_status::OK;
+	//std::cout << "Received buffer: \"" << ans_buf;
+
+	auto res = net::get_fields_strict(ans_buf, ans_bytes, {3});
+	if (res.first == net::action_status::OK) { // checking for ERR
+		if (res.second[0] == "ERR")
+			return net::action_status::RET_ERR;
+		return net::action_status::UNK_REPLY;
+	}
+	
+	res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1});
+
+	if (res.second[0] != "RTR")
+		return net::action_status::UNK_REPLY;
+
+	if (res.second[1] == "DUP") {
+		current_trial--;
+		return net::action_status::TRY_DUP;
+	}
+	
+	if (res.second[1] == "INV") {
+		// TODO: fix
+		return net::action_status::TRY_INV;
+	}
+
+	if (res.second[1] == "NOK")
+		return net::action_status::TRY_NOK;
+	
+	if (res.second[1] == "ENT") {
+		if (current_trial != MAX_TRIALS) { //TODO: fix
+			current_trial = MAX_TRIALS;
+			return net::action_status::TRY_NT;
+		}
+		res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1, 1, 1, 1, 1});
+		if (res.first != net::action_status::OK)
+			return res.first;
+		std::string key;
+		for (size_t i = 2; i < res.second.size(); i++) { // checking if received secret key is valid
+			status = net::is_valid_color(res.second[i]);
+			if (status != net::action_status::OK)
+				return status;
+			if (!key.empty())
+				key += ' ';
+			key += res.second[i];
+		}
+		std::cout << "Secret key: " << key << '\n'; //TODO: fix order of messages
+		in_game = false;
+		return net::action_status::TRY_ENT;
+	}
+	
+	if (res.second[1] == "ETM") {
+		res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1, 1, 1, 1, 1});
+		if (res.first != net::action_status::OK)
+			return res.first;
+		std::string key;
+		for (size_t i = 2; i < res.second.size(); i++) { // checking if received secret key is valid
+			status = net::is_valid_color(res.second[i]);
+			if (status != net::action_status::OK)
+				return status;
+			if (!key.empty())
+				key += ' ';
+			key += res.second[i];
+		}
+		std::cout << "Secret key: " << key << '\n'; //TODO: fix order of messages
+		in_game = false;
+		return net::action_status::TRY_ETM;
+	}
+
+	if (res.second[1] == "ERR")
+		return net::action_status::TRY_ERR;
+
+	if (res.second[1] == "OK") {
+		res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1, 1, 1, 1});
+		if (res.first != net::action_status::OK)
+			return res.first;
+		char nT = res.second[2][0], nB = res.second[3][0], nW = res.second[4][0];
+		if (nT != current_trial) { //TODO: fix
+			if (nT == current_trial - 1) // resend case: server recognized it was a resent trial (...)
+				current_trial--;
+			else { //TODO: Resynchronize might not be correct
+				current_trial = nT; //Resynchronize
+				return net::action_status::TRY_NT;
+			}
+		}
+		if (nB == '4') {
+			in_game = false;
+			std::cout << "Game Won! The secret key was guessed correctly\n";
+		} else
+			std::cout << "Trial " << nT << ": " << nB << " guesses correct in both color and position, " << nW << " guesses correct in color but incorrectly positioned.\n";
+		return net::action_status::OK;
+	}
+
+	return net::action_status::UNK_STATUS;
 }
 
 static net::action_status do_show_trials(const std::string& msg, net::socket_context& udp_info) {
@@ -205,7 +297,7 @@ static net::action_status do_show_trials(const std::string& msg, net::socket_con
 	if (status != net::action_status::OK)
 		return status;
 	
-	std::cout << "Received buffer: \"" << ans_buf << '\"';
+	std::cout << "Received buffer: \"" << ans_buf;
 	return net::action_status::OK;
 }
 
@@ -227,7 +319,7 @@ static net::action_status do_scoreboard(const std::string& msg, net::socket_cont
 	if (status != net::action_status::OK)
 		return status;
 	
-	std::cout << "Received buffer: \"" << ans_buf << '\"';
+	std::cout << "Received buffer: \"" << ans_buf;
 	return net::action_status::OK;
 }
 
@@ -245,7 +337,7 @@ static net::action_status do_quit(const std::string& msg, net::socket_context& u
 	char req_buf[UDP_MSG_SIZE];
 	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << req_buf << '\"';
+	//std::cout << "Sent buffer: \"" << req_buf << '\"';
 
 	char ans_buf[UDP_MSG_SIZE];
 	int ans_bytes = -1;
@@ -253,10 +345,45 @@ static net::action_status do_quit(const std::string& msg, net::socket_context& u
 	if (status != net::action_status::OK)
 		return status;
 	
-	std::cout << "Received buffer: \"" << ans_buf << '\"';
+	//std::cout << "Received buffer: \"" << ans_buf;
 
-	in_game = false;
-	return net::action_status::OK;
+	auto res = net::get_fields_strict(ans_buf, ans_bytes, {3});
+	if (res.first == net::action_status::OK) { // checking for ERR
+		if (res.second[0] == "ERR")
+			return net::action_status::RET_ERR;
+		return net::action_status::UNK_REPLY;
+	}
+
+	res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1});
+
+	if (res.second[0] != "RQT")
+		return net::action_status::UNK_REPLY;
+	if (res.second[1] == "ERR")
+		return net::action_status::QUIT_EXIT_ERR;
+
+	if (res.second[1] == "NOK") 
+		return net::action_status::NOT_IN_GAME; // can't receive this from server (...)
+	
+	if (res.second[1] == "OK") {
+		res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1, 1, 1, 1, 1});
+		if (res.first != net::action_status::OK)
+			return res.first;
+		std::string key;
+		for (size_t i = 2; i < res.second.size(); i++) { // checking if received secret key is valid
+			status = net::is_valid_color(res.second[i]);
+			if (status != net::action_status::OK)
+				return status;
+			if (!key.empty())
+				key += ' ';
+			key += res.second[i];
+		}
+		std::cout << "Server terminated a game with the given secret key: " << key << '\n';
+
+		in_game = false;
+		return net::action_status::OK;
+	}
+
+	return net::action_status::UNK_STATUS;
 }
 
 static net::action_status do_exit(const std::string& msg, net::socket_context& udp_info) {
@@ -275,7 +402,7 @@ static net::action_status do_exit(const std::string& msg, net::socket_context& u
 	char req_buf[UDP_MSG_SIZE];
 	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << req_buf << '\"';
+	//std::cout << "Sent buffer: \"" << req_buf << '\"';
 
 	char ans_buf[UDP_MSG_SIZE];
 	int ans_bytes = -1;
@@ -283,11 +410,46 @@ static net::action_status do_exit(const std::string& msg, net::socket_context& u
 	if (status != net::action_status::OK)
 		return status;
 	
-	std::cout << "Received buffer: \"" << ans_buf << '\"';
+	//std::cout << "Received buffer: \"" << ans_buf;
 
-	in_game = false;
-	exit_app = true;
-	return net::action_status::OK;
+	auto res = net::get_fields_strict(ans_buf, ans_bytes, {3});
+
+	if (res.first == net::action_status::OK) { // checking for ERR
+		if (res.second[0] == "ERR")
+			return net::action_status::RET_ERR;
+		return net::action_status::UNK_REPLY;
+	}
+
+	res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1});
+
+	if (res.second[0] != "RQT")
+		return net::action_status::UNK_REPLY;
+	if (res.second[1] == "ERR")
+		return net::action_status::QUIT_EXIT_ERR;
+	
+	if (res.second[1] == "OK" || res.second[1] == "NOK") {
+		if (res.second[1] == "OK") {
+			res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1, 1, 1, 1, 1});
+			if (res.first != net::action_status::OK)
+				return res.first;
+			std::string key;
+			for (size_t i = 2; i < res.second.size(); i++) { // checking if received secret key is valid
+				status = net::is_valid_color(res.second[i]);
+				if (status != net::action_status::OK)
+					return status;
+				if (!key.empty())
+					key += ' ';
+				key += res.second[i];
+			}
+			std::cout << "Server terminated a game with the given secret key: " << key << '\n';
+			in_game = false;
+		}
+
+		exit_app = true;
+		return net::action_status::OK;
+	}
+
+	return net::action_status::UNK_STATUS;
 }
 
 static net::action_status do_debug(const std::string& msg, net::socket_context& udp_info) {
@@ -320,7 +482,7 @@ static net::action_status do_debug(const std::string& msg, net::socket_context& 
 	char req_buf[UDP_MSG_SIZE];
 	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
 
-	std::cout << "Sent buffer: \"" << req_buf << '\"';
+	//std::cout << "Sent buffer: \"" << req_buf << '\"';
 
 	char ans_buf[UDP_MSG_SIZE];
 	int ans_bytes = -1;
@@ -328,7 +490,7 @@ static net::action_status do_debug(const std::string& msg, net::socket_context& 
 	if (status != net::action_status::OK)
 		return status;
 	
-	std::cout << "Received buffer: \"" << ans_buf << '\"';
+	//std::cout << "Received buffer: \"" << ans_buf;
 
 	auto res = net::get_fields_strict(ans_buf, ans_bytes, {3});
 	if (res.first == net::action_status::OK) { // checking for ERR

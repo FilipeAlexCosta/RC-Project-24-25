@@ -78,7 +78,30 @@ std::string net::status_to_message(action_status status) {
 		case action_status::DEBUG_ERR:
 			res = "Malformed request: either the syntax, player ID, time or color code were incorrect";
 			break;
-
+		case action_status::QUIT_EXIT_ERR:
+			res = "Malformed request: either the syntax or player ID were incorrect";
+			break;
+		case action_status::TRY_NT:
+			res = "Trial number mismatch, trials Resynchronized";
+			break;
+		case action_status::TRY_ERR:
+			res = "Malformed request: either the syntax, player ID or the colour code were incorrect";
+			break;
+		case action_status::TRY_DUP:
+			res = "Duplicated guess. Try a different guess";
+			break;
+		case action_status::TRY_INV:
+			res = "Invalid trial, the trial number isn't the expected value";
+			break;
+		case action_status::TRY_NOK:
+			res = "Trial out of context"; //TODO: write a more complete messsage
+			break;
+		case action_status::TRY_ENT:
+			res = "Maximum number of attemps achieved (8), you lost the game";
+			break;
+		case action_status::TRY_ETM:
+			res = "Maximum play time achieved, you lost the game";
+			break;
 		default:
 			res = "Unknown error";
 	}

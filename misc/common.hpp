@@ -20,6 +20,7 @@
 #define MAX_PLAYTIME_SIZE 3
 #define UDP_MSG_SIZE 128
 #define MAX_RESEND 3
+#define MAX_TRIALS '8'
 
 namespace net {
 typedef struct socket_context {
@@ -47,7 +48,16 @@ enum class action_status {
 	UNK_STATUS,
 	START_NOK,
 	START_ERR,
-	DEBUG_ERR
+	DEBUG_ERR,
+	QUIT_EXIT_ERR,
+	TRY_NT,
+	TRY_ERR,
+	TRY_DUP,
+	TRY_INV,
+	TRY_NOK,
+	TRY_ENT,
+	TRY_ETM,
+
 };
 
 using field = std::string_view;
