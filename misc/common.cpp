@@ -15,6 +15,10 @@ std::string net::status_to_message(action_status status) {
 			res = "Requested command does not exist";
 			break;
 
+		case action_status::RET_ERR:
+			res = "Server received unexpected request";
+			break;
+
 		case action_status::MISSING_ARG:
 			res = "Missing arguments for requested command";
 			break;
@@ -38,14 +42,41 @@ std::string net::status_to_message(action_status status) {
 		case action_status::NOT_IN_GAME:
 			res = "Requested command can only be called after starting a game";
 			break;
+
 		case action_status::SEND_ERR:
 			res = "Failed to send message to the server. Please check the server address and port, or try again later";
 			break;
+
 		case action_status::CONN_TIMEOUT:
-			res = "Maximum number of timeouts of 5s reached. The request couldn't be completed";
+			res = "Connection timed out";
 			break;
+
 		case action_status::RECV_ERR:
 			res = "Failed to receive a response from the server"; 
+			break;
+
+		case action_status::MISSING_EOM:
+			res = "Message did not end with \"end of message\" (EOM)";
+			break;
+
+		case action_status::UNK_REPLY:
+			res = "Unknown reply in received answer";
+			break;
+
+		case action_status::UNK_STATUS:
+			res = "Unknown status in received answer";
+			break;
+
+		case action_status::START_NOK:
+			res = "User with the given player ID is already in-game";
+			break;
+
+		case action_status::START_ERR:
+			res = "Malformed request: either the syntax, player ID or time were incorrect";
+			break;
+
+		case action_status::DEBUG_ERR:
+			res = "Malformed request: either the syntax, player ID, time or color code were incorrect";
 			break;
 
 		default:
@@ -60,8 +91,11 @@ action_status net::udp_request(const char* req, uint32_t req_sz, net::socket_con
 		if (read == -1)
 			return net::action_status::SEND_ERR;
 		read = recvfrom(udp_info.socket_fd, ans, ans_sz, 0, (struct sockaddr*) udp_info.sender_addr, udp_info.sender_addr_len);
-		if (read >= 0)
+		if (read >= 0) {
+			if (read == 0 || ans[--read] != DEFAULT_EOM)
+				return net::action_status::MISSING_EOM;
 			return net::action_status::OK;
+		}
 		if (errno != EWOULDBLOCK && errno != EAGAIN)
 			return net::action_status::RECV_ERR;
 	}
@@ -98,13 +132,17 @@ std::pair<action_status, message> net::get_fields(const char* buf, size_t buf_sz
 	return {net::action_status::OK, fields};
 }
 
-std::pair<action_status, message> net::get_fields_strict(const char* buf, size_t buf_sz, std::initializer_list<uint32_t> field_szs, char sep) {
+std::pair<action_status, message> net::get_fields_strict(const char* buf, size_t buf_sz, std::initializer_list<int> field_szs, char sep) {
 	message fields;
 	fields.reserve(std::size(field_szs));
 	size_t i = 0;
 	if (buf_sz > 0 && buf[0] == sep)
 		return {net::action_status::ERR, fields};
 	for (auto size : field_szs) {
+		if (size < 0) {
+			size = 0;
+			for (; (size + i) < buf_sz && buf[size + i] != sep; size++);
+		}
 		size_t next_sep = i + size;
 		if (next_sep >= buf_sz) {
 			if (next_sep != buf_sz)
@@ -159,8 +197,8 @@ action_status net::is_valid_max_playtime(const field& field) {
 	} catch (const std::invalid_argument& err) { // cannot be read
 		return net::action_status::BAD_ARG;
 	} // out_of_range exception shouldn't be an issue
-	if (max_playtime < 0 || max_playtime > 600) // check <= 600
-		return net::action_status::BAD_ARG;
+	/*if (max_playtime < 0 || max_playtime > 600) // check <= 600
+		return net::action_status::BAD_ARG;*/
 	return net::action_status::OK;
 }
 

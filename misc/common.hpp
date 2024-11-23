@@ -32,6 +32,7 @@ typedef struct socket_context {
 enum class action_status {
 	OK,
 	ERR,
+	RET_ERR,
 	UNK_ACTION,
 	MISSING_ARG,
 	EXCESS_ARGS,
@@ -41,6 +42,12 @@ enum class action_status {
 	SEND_ERR,
 	CONN_TIMEOUT,
 	RECV_ERR,
+	MISSING_EOM,
+	UNK_REPLY,
+	UNK_STATUS,
+	START_NOK,
+	START_ERR,
+	DEBUG_ERR
 };
 
 using field = std::string_view;
@@ -59,7 +66,7 @@ std::pair<action_status, message> get_fields(
 std::pair<action_status, message> get_fields_strict(
 	const char* buf,
 	size_t buf_sz,
-	std::initializer_list<uint32_t> field_szs,
+	std::initializer_list<int> field_szs,
 	char sep = DEFAULT_SEP
 );
 

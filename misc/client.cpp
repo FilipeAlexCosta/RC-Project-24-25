@@ -19,12 +19,9 @@ static net::action_status do_debug(const std::string& msg, net::socket_context& 
 
 int main() {
 	int fd, errcode;
-	ssize_t n;
 	struct addrinfo hints, *res;
 	struct sockaddr_in addr;
 	socklen_t addrlen = sizeof(addr);
-	char buffer[128];
-	char host[NI_MAXHOST], service[NI_MAXSERV];
 
 	if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
 		return 1;
@@ -81,6 +78,7 @@ int main() {
 		if (exit_app)
 			return 0; // TODO: maybe do the actual closing down
 	}
+
 	return 0;
 }
 
@@ -122,11 +120,34 @@ static net::action_status do_start(const std::string& msg, net::socket_context& 
 	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
 	if (status != net::action_status::OK)
 		return status;
-	
-	setup_game_clientside(fields[1]);
+
+	auto res = net::get_fields_strict(ans_buf, ans_bytes, {3});
+	if (res.first == net::action_status::OK) { // checking for ERR
+		if (res.second[0] == "ERR")
+			return net::action_status::RET_ERR;
+		return net::action_status::UNK_REPLY;
+	}
+	res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1});
+	if (res.first != net::action_status::OK)
+		return res.first;
 
 	std::cout << "Received buffer: \"" << ans_buf << '\"';
-	return net::action_status::OK;
+
+	if (res.second[0] != "RSG")
+		return net::action_status::UNK_REPLY;
+
+	if (res.second[1] == "NOK")
+		return net::action_status::START_NOK;
+
+	if (res.second[1] == "ERR")
+		return net::action_status::START_ERR;
+
+	if (res.second[1] == "OK") {
+		setup_game_clientside(fields[1]);
+		return net::action_status::OK;
+	}
+
+	return net::action_status::UNK_STATUS;
 }
 
 static net::action_status do_try(const std::string& msg, net::socket_context& udp_info) {
@@ -307,9 +328,31 @@ static net::action_status do_debug(const std::string& msg, net::socket_context& 
 	if (status != net::action_status::OK)
 		return status;
 	
-	setup_game_clientside(fields[1]);
-
 	std::cout << "Received buffer: \"" << ans_buf << '\"';
-	return net::action_status::OK;
-}
 
+	auto res = net::get_fields_strict(ans_buf, ans_bytes, {3});
+	if (res.first == net::action_status::OK) { // checking for ERR
+		if (res.second[0] == "ERR")
+			return net::action_status::RET_ERR;
+		return net::action_status::UNK_REPLY;
+	}
+	res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1});
+	if (res.first != net::action_status::OK)
+		return res.first;
+
+	if (res.second[0] != "RDB")
+		return net::action_status::UNK_REPLY;
+
+	if (res.second[1] == "NOK")
+		return net::action_status::START_NOK;
+
+	if (res.second[1] == "ERR")
+		return net::action_status::DEBUG_ERR;
+
+	if (res.second[1] == "OK") {
+		setup_game_clientside(fields[1]);
+		return net::action_status::OK;
+	}
+
+	return net::action_status::UNK_STATUS;
+}
