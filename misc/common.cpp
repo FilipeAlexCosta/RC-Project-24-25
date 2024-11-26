@@ -94,7 +94,7 @@ std::string net::status_to_message(action_status status) {
 			res = "Invalid trial, the trial number isn't the expected value";
 			break;
 		case action_status::TRY_NOK:
-			res = "Trial out of context"; //TODO: write a more complete messsage
+			res = "Trial out of context (possibly no ongoing game)";
 			break;
 		case action_status::TRY_ENT:
 			res = "Maximum number of attemps achieved (8), you lost the game";
