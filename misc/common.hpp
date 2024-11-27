@@ -74,6 +74,8 @@ std::string status_to_message(action_status status);
 
 action_status udp_request(const char* req, uint32_t req_sz, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read);
 
+action_status tcp_request(const char* req, uint32_t req_sz, net::socket_context& tcp_info, char* ans, uint32_t ans_sz, int& r);
+
 std::pair<action_status, message> get_fields(
 	const char* buf,
 	size_t buf_sz,
@@ -97,11 +99,31 @@ action_status is_valid_color(const field& field);
 
 void fill_max_playtime(char res[MAX_PLAYTIME_SIZE], const field& max_playtime);
 
+template<typename... Args>
 struct action_map {
-	using action = std::function<action_status(const std::string&, socket_context& socket_info)>;
-	void add_action(const std::string_view& name, const action& action);
-	void add_action(std::initializer_list<const std::string_view> names, const action& action);
-	action_status execute(const std::string& command, socket_context& socket_info) const;
+	using action = std::function<action_status(const std::string&, Args...)>;
+
+	void add_action(const std::string_view& name, const action& action) {
+		_actions.insert({std::move(static_cast<std::string>(name)), action});
+	}
+
+	void add_action(std::initializer_list<const std::string_view> names, const action& action) {
+		for (auto name : names)
+			add_action(name, action);
+	}
+
+	action_status execute(const std::string& command, Args... args) const {
+		size_t from  = 0;
+		for (; from < command.size() && std::isspace(command[from]); from++);
+		if (from > command.size())
+			return action_status::UNK_ACTION;
+		size_t to = from + 1;
+		for (; to < command.size() && (!std::isspace(command[to])); to++);
+		auto it = _actions.find(std::string(std::begin(command) + from, std::begin(command) + to));
+		if (it == _actions.end())
+			return action_status::UNK_ACTION;
+		return it->second(command, args...);
+	}
 private:
 	std::unordered_map<std::string, action> _actions;
 };

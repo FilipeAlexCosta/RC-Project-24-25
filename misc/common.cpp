@@ -166,6 +166,27 @@ action_status net::udp_request(const char* req, uint32_t req_sz, net::socket_con
 	return net::action_status::CONN_TIMEOUT;
 }
 
+action_status net::tcp_request(const char* req, uint32_t req_sz, net::socket_context& tcp_info, char* ans, uint32_t ans_sz, int& r) {
+	int n = 0;
+	while (r < req_sz) {
+		n = write(tcp_info.socket_fd, req, req_sz - r);
+		if (n <= 0)
+			return net::action_status::SEND_ERR;
+		r += n;
+		req += n;
+	}
+
+	while (r < ans_sz) {
+		n = read(tcp_info.socket_fd, ans, ans_sz - r);
+		if (n <= 0)
+			return net::action_status::SEND_ERR;
+		r += n;
+		ans += n;
+	}
+
+	return net::action_status::OK;
+}
+
 std::pair<action_status, message> net::get_fields(const char* buf, size_t buf_sz, std::initializer_list<int> field_szs) {
 	message fields;
 	fields.reserve(std::size(field_szs));
@@ -292,26 +313,4 @@ action_status net::is_valid_color(const field& field) {
 			res = net::action_status::BAD_ARG;
 	}
 	return res;
-}
-
-void action_map::add_action(const std::string_view& name, const action& action) {
-	_actions.insert({std::move(static_cast<std::string>(name)), action});
-}
-
-void action_map::add_action(std::initializer_list<const std::string_view> names, const action& action) {
-	for (auto name : names)
-		add_action(name, action);
-}
-
-action_status action_map::execute(const std::string& command, socket_context& socket_info) const {
-	size_t from  = 0;
-	for (; from < command.size() && std::isspace(command[from]); from++);
-	if (from > command.size())
-		return action_status::UNK_ACTION;
-	size_t to = from + 1;
-	for (; to < command.size() && (!std::isspace(command[to])); to++);
-	auto it = _actions.find(std::string(std::begin(command) + from, std::begin(command) + to));
-	if (it == _actions.end())
-		return action_status::UNK_ACTION;
-	return it->second(command, socket_info);
 }
