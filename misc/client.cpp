@@ -3,6 +3,7 @@
 #include <cstring>
 
 #define PORT "58011"
+#define TIMEOUT 5
 
 static bool in_game = false;
 static bool exit_app = false;
@@ -18,47 +19,15 @@ static net::action_status do_exit(const std::string& msg, net::socket_context& u
 static net::action_status do_debug(const std::string& msg, net::socket_context& udp_info);
 
 int main() {
-	int fd, errcode;
-	struct addrinfo hints, *res;
-	struct sockaddr_in addr;
-	socklen_t addrlen = sizeof(addr);
-
-	if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+	net::socket_context udp_info{"tejo.tecnico.ulisboa.pt", PORT, SOCK_DGRAM};
+	if (!udp_info.is_valid()) {
+		std::cout << "Failed to create udp socket. Check if the provided address and port are correct.\n";
 		return 1;
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_DGRAM;
-	/* testar no msm pc->"127.0.0.1"*/
-	if ((errcode = getaddrinfo("tejo.tecnico.ulisboa.pt", PORT, &hints, &res)) != 0)
+	}
+	if (udp_info.set_timeout(5)) {
+		std::cout << "Failed to set udp socket's timeout.\n"; 
 		return 1;
-
-	net::socket_context udp_info{
-		fd,
-		res,
-		&addr,
-		&addrlen
-	};
-
-	struct timeval timeout;
-	timeout.tv_sec = 5; // 5 s timeout
-	timeout.tv_usec = 0;
-	if(setsockopt(udp_info.socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1)
-		return 1;
-
-	/*if ((n = sendto(fd, "Hello!\n", 7, 0, res->ai_addr, res->ai_addrlen)) == -1)
-		return 1;
-	if ((n = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*) &addr, &addrlen)) == -1)
-		return 1;
-
-	write(1, "echo: ", 6);
-	write(1, buffer, n);
-
-	if ((errcode = getnameinfo((struct sockaddr*) &addr, addrlen, host, sizeof(host), service, sizeof(service), 0)) != 0)
-		return 1;
-	printf("sent by [%s:%s]\n", host, service);
-
-	freeaddrinfo(res);
-	close(fd);*/
+	}
 
 	net::action_map actions;
 	actions.add_action("start", do_start);

@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <functional>
 #include <string>
+#include <cstring>
 #include <initializer_list>
 
 #define DEFAULT_SEP ' '
@@ -23,12 +24,18 @@
 #define MAX_TRIALS '8'
 
 namespace net {
-typedef struct socket_context {
-	int socket_fd;
-	const struct addrinfo* receiver_info;
-	struct sockaddr_in* sender_addr;
-	socklen_t* sender_addr_len;
-} socket_context;
+struct socket_context {
+	int socket_fd = -1;
+	addrinfo* receiver_info = nullptr;
+	sockaddr_in sender_addr;
+	socklen_t sender_addr_len = sizeof(sender_addr);
+
+	socket_context(const std::string_view& rec_addr, const std::string_view& rec_port, int type);
+	~socket_context();
+
+	int set_timeout(size_t s);
+	bool is_valid();
+};
 
 enum class action_status {
 	OK,

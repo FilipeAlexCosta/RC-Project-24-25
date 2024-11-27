@@ -4,6 +4,47 @@
 
 using namespace net;
 
+socket_context::socket_context(const std::string_view& rec_addr, const std::string_view& rec_port, int type) {
+	socket_fd = socket(AF_INET, type, 0);
+	if (socket_fd == -1)
+		return;
+	addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = type;
+
+	if (getaddrinfo(rec_addr.data(), rec_port.data(), &hints, &receiver_info) != 0) {
+		close(socket_fd);
+		socket_fd = -1;
+		return;
+	}
+
+	if (type == SOCK_STREAM && connect(socket_fd, receiver_info->ai_addr, receiver_info->ai_addrlen) == -1) {
+		freeaddrinfo(receiver_info);
+		close(socket_fd);
+		socket_fd = -1;
+		return;
+	}
+}
+
+socket_context::~socket_context() {
+	if (socket_fd == -1)
+		return;
+	freeaddrinfo(receiver_info);
+	close(socket_fd);
+}
+
+int socket_context::set_timeout(size_t s) {
+	struct timeval timeout;
+	timeout.tv_sec = s; // s second timeout
+	timeout.tv_usec = 0;
+	return setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1;
+}
+
+bool socket_context::is_valid() {
+	return socket_fd != -1;
+}
+
 std::string net::status_to_message(action_status status) {
 	std::string res = "get_error_message failed";
 	switch (status) {
@@ -113,7 +154,7 @@ action_status net::udp_request(const char* req, uint32_t req_sz, net::socket_con
 		read = sendto(udp_info.socket_fd, req, req_sz, 0, udp_info.receiver_info->ai_addr, udp_info.receiver_info->ai_addrlen);
 		if (read == -1)
 			return net::action_status::SEND_ERR;
-		read = recvfrom(udp_info.socket_fd, ans, ans_sz, 0, (struct sockaddr*) udp_info.sender_addr, udp_info.sender_addr_len);
+		read = recvfrom(udp_info.socket_fd, ans, ans_sz, 0, (struct sockaddr*) &udp_info.sender_addr, &udp_info.sender_addr_len);
 		if (read >= 0) {
 			if (read == 0 || ans[--read] != DEFAULT_EOM)
 				return net::action_status::MISSING_EOM;
