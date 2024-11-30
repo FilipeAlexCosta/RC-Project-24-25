@@ -42,7 +42,7 @@ int main() {
 	actions.add_action({"scoreboard", "sb"}, do_scoreboard);*/
 	actions.add_action("quit", do_quit);
 	actions.add_action("exit", do_exit);
-	/*actions.add_action("debug", do_debug);*/
+	actions.add_action("debug", do_debug);
 
 	while (!exit_app) {
 		net::stream<net::file_source> strm{STDIN_FILENO, false};
@@ -309,116 +309,68 @@ static net::action_status do_exit(net::stream<net::file_source>& msg, net::socke
 	return res;
 }
 
-/*static net::action_status do_try(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
-	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1, 1, 1, 1, 1});
-	if (status != net::action_status::OK)
-		return status;
-
-	for (size_t i = 1; i < fields.size(); i++) {
-		status = net::is_valid_color(fields[i]);
-		if (status != net::action_status::OK)
-			return status;
+static net::action_status do_debug(net::stream<net::file_source>& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
+	auto res = msg.read({{PLID_SIZE, PLID_SIZE}, {1, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
+	if (res.first != net::action_status::OK || (res.first = msg.no_more_fields()) != net::action_status::OK)
+		return res.first;
+	if ((res.first = net::is_valid_plid(res.second[0])) != net::action_status::OK)
+		return res.first;
+	if ((res.first = net::is_valid_max_playtime(res.second[1])) != net::action_status::OK)
+		return res.first;
+	net::out_stream out_strm;
+	out_strm.write("DBG");
+	out_strm.write(res.second[0]);
+	out_strm.write_and_fill(res.second[1], 3, '0');
+	for (size_t i = 2; i < 2 + GUESS_SIZE; i++) {
+		if ((res.first = net::is_valid_color(res.second[i])) != net::action_status::OK)
+			return res.first;
+		out_strm.write(res.second[i]);
 	}
+	out_strm.prime();
 
-	if (!in_game)
-		return net::action_status::NOT_IN_GAME;
-	current_trial++;
+	if (in_game)
+		return net::action_status::ONGOING_GAME;
 
-	fields[0] = "TRY";
-	fields.insert(std::begin(fields) + 1, current_plid);
-	fields.push_back(net::field(&current_trial, 1));
-
-	char req_buf[UDP_MSG_SIZE];
-	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
-
-	//std::cout << "Sent buffer: \"" << req_buf << '\"';
+	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
 	char ans_buf[UDP_MSG_SIZE];
 	int ans_bytes = -1;
-	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
-	if (status != net::action_status::OK)
-		return status;
-	
-	//std::cout << "Received buffer: \"" << ans_buf;
+	res.first = net::udp_request(out_strm, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
+	if (res.first != net::action_status::OK)
+		return res.first;
 
-	auto res = net::get_fields_strict(ans_buf, ans_bytes, {3});
-	if (res.first == net::action_status::OK) { // checking for ERR
-		if (res.second[0] == "ERR")
+	std::cout << "Received buffer: \"" << std::string_view{ans_buf, static_cast<size_t>(ans_bytes)} << '\"' << std::endl;
+	net::stream<net::udp_source> ans_strm{std::string_view{ans_buf, static_cast<size_t>(ans_bytes)}};
+
+	auto ans_res = ans_strm.read(3, 3);
+	if (ans_res.first != net::action_status::OK)
+		return ans_res.first;
+	if (ans_res.second != "RDB") {
+		if (ans_res.second == "ERR")
 			return net::action_status::RET_ERR;
 		return net::action_status::UNK_REPLY;
 	}
-	
-	res = net::get_fields_strict(ans_buf, ans_bytes, {3, 3});
-	if (res.first == net::action_status::OK) { // check for DUP, INV, NOK, ERR
-		if (res.second[0] != "RTR")
-			return net::action_status::UNK_REPLY;
-		if (res.second[1] == "DUP") {
-			current_trial--;
-			return net::action_status::TRY_DUP;
-		}
-		if (res.second[1] == "INV") // TODO: close down or???
-			return net::action_status::TRY_INV;
-		if (res.second[1] == "NOK")
-			return net::action_status::TRY_NOK;
-		if (res.second[1] == "ERR")
-			return net::action_status::TRY_ERR;
-		return net::action_status::UNK_STATUS;
-	}
 
-	res = net::get_fields_strict(ans_buf, ans_bytes, {3, 3, 1, 1, 1, 1}); // check for ENT & ETM
-	if (res.first == net::action_status::OK) {
-		if (res.second[0] != "RTR")
-			return net::action_status::UNK_REPLY;
-		bool is_ENT = res.second[1] == "ENT";
-		if (is_ENT || res.second[1] == "ETM") {
-			for (size_t i = 2; i < res.second.size(); i++) {
-				auto status = net::is_valid_color(res.second[i]);
-				if (status != net::action_status::OK)
-					return status;
-			}
-			if (is_ENT)
-				std::cout << "You ran out of tries!";
-			else
-				std::cout << "You ran out of time!";
-			for (size_t i = 2; i < res.second.size(); i++)
-				std::cout << res.second[i] << ' ';
-			std::cout << "was the correct guess!\n";
-			in_game = false;
-			return net::action_status::OK;
-		}
-		return net::action_status::UNK_STATUS;
-	}
+	ans_res = ans_strm.read(2, 3);
+	if (ans_res.first != net::action_status::OK ||
+		(ans_res.first = ans_strm.check_strict_end()) != net::action_status::OK)
+		return ans_res.first;
 
-	res = net::get_fields_strict(ans_buf, ans_bytes, {3, 2, 1, 1, 1}); // check for OK
-	if (res.first == net::action_status::OK) {
-		if (res.second[0] != "RTR")
-			return net::action_status::UNK_REPLY;
-		if (res.second[1] != "OK")
-			return net::action_status::UNK_STATUS;
-		if (res.second[2][0] != current_trial) {
-			if (res.second[2][0] == (current_trial - 1))
-				current_trial--;
-			else
-				return net::action_status::TRY_INV;
-		}
-		if (res.second[3][0] < '0' || res.second[4][0] < '0')
-			return net::action_status::TRY_NT; // TODO err message
-		if (res.second[3][0] + res.second[4][0] - 2 * '0' > '4') // nB + nW <= 4
-			return net::action_status::TRY_NT; // TODO err message
-
-		if (res.second[3][0] == '4') { // check for a win
-			in_game = false;
-			std::cout << "You won in " << current_trial << " tries!\n";
-			return net::action_status::OK;
-		}
-		std::cout << "You guessed " << res.second[3] << " colors in the correct place and";
-		std::cout << " there were " << res.second[4] << " correct colors with an incorrect placement\n";
+	if (ans_res.second == "OK") {
+		setup_game_clientside(res.second[0]);
 		return net::action_status::OK;
 	}
+
+	if (ans_res.second == "NOK")
+		return net::action_status::START_NOK;
+
+	if (ans_res.second == "ERR")
+		return net::action_status::DEBUG_ERR;
+
 	return net::action_status::UNK_STATUS;
 }
 
-static net::action_status do_show_trials(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
+/*static net::action_status do_show_trials(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
 	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
 	if (status != net::action_status::OK)
 		return status;
@@ -464,71 +416,4 @@ static net::action_status do_scoreboard(const std::string& msg, net::socket_cont
 	
 	//std::cout << "Received buffer: \"" << ans_buf;
 	return net::action_status::OK;
-}
-
-static net::action_status do_debug(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
-	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1, PLID_SIZE, -1, 1, 1, 1, 1});
-	if (status != net::action_status::OK)
-		return status;
-
-	status = net::is_valid_plid(fields[1]);
-	if (status != net::action_status::OK)
-		return status;
-
-	status = net::is_valid_max_playtime(fields[2]);
-	if (status != net::action_status::OK)
-		return status;
-
-	for (size_t i = 3; i < fields.size(); i++) {
-		status = net::is_valid_color(fields[i]);
-		if (status != net::action_status::OK)
-			return status;
-	}
-
-	if (in_game)
-		return net::action_status::ONGOING_GAME;
-
-	char sent_m_time[MAX_PLAYTIME_SIZE];
-	net::fill_max_playtime(sent_m_time, fields[2]);
-	fields[0] = "DBG";
-	fields[2] = net::field(sent_m_time, MAX_PLAYTIME_SIZE);
-
-	char req_buf[UDP_MSG_SIZE];
-	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
-
-	//std::cout << "Sent buffer: \"" << req_buf << '\"';
-
-	char ans_buf[UDP_MSG_SIZE];
-	int ans_bytes = -1;
-	status = net::udp_request(req_buf, n_bytes, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
-	if (status != net::action_status::OK)
-		return status;
-	
-	//std::cout << "Received buffer: \"" << ans_buf;
-
-	auto res = net::get_fields_strict(ans_buf, ans_bytes, {3});
-	if (res.first == net::action_status::OK) { // checking for ERR
-		if (res.second[0] == "ERR")
-			return net::action_status::RET_ERR;
-		return net::action_status::UNK_REPLY;
-	}
-	res = net::get_fields_strict(ans_buf, ans_bytes, {3, -1});
-	if (res.first != net::action_status::OK)
-		return res.first;
-
-	if (res.second[0] != "RDB")
-		return net::action_status::UNK_REPLY;
-
-	if (res.second[1] == "NOK")
-		return net::action_status::START_NOK;
-
-	if (res.second[1] == "ERR")
-		return net::action_status::DEBUG_ERR;
-
-	if (res.second[1] == "OK") {
-		setup_game_clientside(fields[1]);
-		return net::action_status::OK;
-	}
-
-	return net::action_status::UNK_STATUS;
 }*/
