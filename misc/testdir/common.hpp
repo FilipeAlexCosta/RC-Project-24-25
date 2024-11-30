@@ -16,7 +16,7 @@
 #include <initializer_list>
 
 #define DEFAULT_SEP ' '
-#define DEFAULT_EOM '\n'
+#define DEFAULT_EOM '\t'
 #define PLID_SIZE 6
 #define MAX_PLAYTIME_SIZE 3
 #define UDP_MSG_SIZE 128
@@ -67,91 +67,41 @@ enum class action_status {
 
 };
 
-struct tcp_source {
-	tcp_source(int fd) : _socket_fd{fd} {}
-
-	bool is_skippable(char c) const {
-		return c == DEFAULT_SEP;
-	}
-
-	action_status read_len(std::string& buf, size_t len, size_t& n, bool check_eom) {
-		n = 0;
-		if (len == 0 || _found_eom)
-			return action_status::OK;
-		char temp[len];
-		while (len != 0) {
-			int res = read(_socket_fd, temp, len);
-			if (res < 0)
-				return action_status::CONN_TIMEOUT;
-			if (res == 0) {
-				_found_eom = true;
-				return net::action_status::OK;
-			}
-			len -= res;
-			if (check_eom && temp[res - 1] == DEFAULT_EOM) {
-				res--;
-				len = 0;
-				_found_eom = true;
-			}
-			buf.append(temp, temp + res);
-			n += res;
-		}
-		return action_status::OK;
-	}
-
-	bool found_eom() const {
-		return _found_eom;
-	}
-private:
-	int _socket_fd;
+struct source {
+	bool found_eom() const;
+	bool finished() const;
+protected:
 	bool _found_eom = false;
+	bool _finished = false;
 };
 
-struct string_source {
-	string_source(const std::string_view& source) : _source(source) {}
-	string_source(std::string_view&& source) : _source(std::move(source)) {}
+struct file_source : public source {
+	file_source(int fd);
+	bool is_skippable(char c) const;
+	action_status read_len(std::string& buf, size_t len, size_t& n, bool check_eom);
+private:
+	int _fd;
+};
 
-	action_status read_len(std::string& buf, size_t len, size_t& n, bool check_eom) {
-		if (len == 0 || _found_eom) {
-			n = 0;
-			return action_status::OK;
-		}
-		size_t end = _at + len;
-		if (end > _source.size()) {
-			end = _source.size();
-			_found_eom = true;
-		}
-		buf.append(std::begin(_source) + _at, std::begin(_source) + end);
-		n = end - _at;
-		_at = end;
-		if (check_eom && buf.back() == DEFAULT_EOM) {
-			n--;
-			buf.pop_back();
-			_found_eom = true;
-		}
-		return net::action_status::OK;
-	}
+struct tcp_source : public file_source {
+	tcp_source(int fd);
+	bool is_skippable(char c) const;
+};
 
-	bool is_skippable(char c) const {
-		return std::isspace(c);
-	}
-
-	bool found_eom() const {
-		return _found_eom;
-	}
+struct string_source : public source {
+	string_source(const std::string_view& source);
+	string_source(std::string_view&& source);
+	action_status read_len(std::string& buf, size_t len, size_t& n, bool check_eom);
+	bool is_skippable(char c) const;
 private:
 	std::string_view _source;
 	size_t _at = 0;
-	bool _found_eom = false;
 };
 
 struct udp_source : public string_source {
-	udp_source(const std::string_view& source) : string_source(source) {}
-	udp_source(std::string_view&& source) : string_source(std::move(source)) {}
-
-	bool is_skippable(char c) const {
-		return c != DEFAULT_SEP;
-	}
+	udp_source(const std::string_view& source);
+	udp_source(std::string_view&& source);
+	bool is_skippable(char c) const;
 };
 
 using field = std::string_view;
@@ -220,13 +170,13 @@ struct stream {
 		return {action_status::OK, buf};
 	}
 
-	action_status no_more_fields(bool check_eom = true) {
+	action_status no_more_fields() {
 		if (_source.found_eom())
 			return net::action_status::OK;
 		std::string buf;
 		while (true) {
 			size_t bytes_read = 0;
-			auto res = _source.read_len(buf, 1, bytes_read, check_eom);
+			auto res = _source.read_len(buf, 1, bytes_read, true);
 			if (res != net::action_status::OK)
 				return res;
 			if (bytes_read == 0)
@@ -237,6 +187,17 @@ struct stream {
 			}
 			return net::action_status::EXCESS_ARGS;
 		}
+	}
+
+	action_status exhaust() {
+		while (!_source.finished()) {
+			std::string buf;
+			size_t bytes_read = 0;
+			_source.read_len(buf, 1, bytes_read, true);
+		}
+		if (!_source.found_eom())
+			return net::action_status::MISSING_EOM;
+		return net::action_status::OK;
 	}
 
 	bool found_eom() const {

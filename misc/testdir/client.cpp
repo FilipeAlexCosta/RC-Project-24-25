@@ -42,30 +42,26 @@ int main() {
 	actions.add_action({"scoreboard", "sb"}, do_scoreboard);
 	actions.add_action("quit", do_quit);
 	actions.add_action("exit", do_exit);
-	actions.add_action("debug", do_debug);
+	actions.add_action("debug", do_debug);*/
 
 	while (!exit_app) {
-		std::string input;
-		std::getline(std::cin, input);
-		auto status = actions.execute(input, udp_info, tcp_info);
+		net::stream<net::tcp_source> s{STDIN_FILENO, false};
+		auto [status,  act] = s.read(1, SIZE_MAX);
+		std::cout << act << "\n";
+		std::cerr << net::status_to_message(status) << ".\n";
+		status = s.no_more_fields();
 		if (status != net::action_status::OK)
 			std::cerr << net::status_to_message(status) << ".\n";
-	}
-
-	std::cout << "Exiting the Player application...\n";*/
-
-	while (!exit_app) {
+		status = s.exhaust();
+		std::cerr << "--------------------------------\n";
 		std::string input;
 		std::getline(std::cin, input);
 		//auto status = actions.execute(input, udp_info, tcp_info);
-		net::stream<net::string_source> s{{input}, false};
-		auto [status, fs] = s.read({{5, 5}, {6, 6}, {1, 3}});
-		for (auto f : fs)
-			std::cout << "\"" << f << "\"\n";
 		if (status != net::action_status::OK)
 			std::cerr << net::status_to_message(status) << ".\n";
-		std::cerr << net::status_to_message(s.no_more_fields()) << "\n";
 	}
+
+	std::cout << "Exiting the Player application...\n";
 	return 0;
 }
 

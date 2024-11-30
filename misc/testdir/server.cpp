@@ -97,14 +97,19 @@ int main() {
 
 		net::stream<net::tcp_source> s{newfd};
 		while (true) {
-			auto [res, str] = s.read(1, SIZE_MAX);
-			if (res != net::action_status::OK) {
-				if (s.found_eom())
-					s = net::stream<net::tcp_source>{newfd};
-				std::cout << net::status_to_message(res) << "\n";
-				continue;
+			//auto [res, str] = s.read(1, SIZE_MAX);
+			auto [res, str] = s.read({{5, 5}, {6, 6}, {1, 3}});
+			//std::cout << "\"" << str << "\"\n";
+			for (auto s : str)
+				std::cout << s << "\n";
+			if (s.found_eom()) {
+				s = net::stream<net::tcp_source>{newfd};
+				std::cout << "Found EOM\n";
+			} else {
+				std::cout << "Did not find EOM\n";
 			}
-			std::cout << "\"" << str << "\"\n";
+			std::cout << net::status_to_message(res) << "\n";
+			std::cout << "-------------------------------\n";
 		}
 
         close(newfd);

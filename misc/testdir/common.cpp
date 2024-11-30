@@ -45,6 +45,99 @@ bool socket_context::is_valid() {
 	return socket_fd != -1;
 }
 
+bool source::found_eom() const {
+	return _found_eom;
+}
+
+bool source::finished() const {
+	return _finished;
+}
+
+file_source::file_source(int fd) : _fd{fd} {}
+
+bool file_source::is_skippable(char c) const {
+	return std::isspace(c) && c != DEFAULT_EOM;
+}
+
+action_status file_source::read_len(std::string& buf, size_t len, size_t& n, bool check_eom) {
+	n = 0;
+	if (len == 0)
+		return action_status::OK;
+	if (_finished) {
+		if (_found_eom)
+			return net::action_status::OK;
+		return net::action_status::MISSING_EOM;
+	}
+	char temp[len];
+	while (len != 0) {
+		int res = read(_fd, temp, len);
+		if (res < 0)
+			return action_status::CONN_TIMEOUT;
+		if (res == 0) {
+			_finished = true;
+			return net::action_status::MISSING_EOM;
+		}
+		len -= res;
+		if (check_eom && temp[res - 1] == DEFAULT_EOM) {
+			res--;
+			len = 0;
+			_finished = true;
+			_found_eom = true;
+		}
+		buf.append(temp, temp + res);
+		n += res;
+	}
+	return action_status::OK;
+}
+
+tcp_source::tcp_source(int fd) : net::file_source{fd} {}
+
+bool tcp_source::is_skippable(char c) const {
+	return c == DEFAULT_SEP;
+}
+
+string_source::string_source(const std::string_view& source) : _source(source) {}
+string_source::string_source(std::string_view&& source) : _source(std::move(source)) {}
+
+action_status string_source::read_len(std::string& buf, size_t len, size_t& n, bool check_eom) {
+	n = 0;
+	if (len == 0)
+		return action_status::OK;
+	if (_finished) {
+		if (_found_eom)
+			return net::action_status::OK;
+		return net::action_status::MISSING_EOM;
+	}
+	size_t end = _at + len;
+	if (end > _source.size()) {
+		end = _source.size();
+		_finished = true;
+		if (_source.back() != DEFAULT_EOM)
+			return net::action_status::MISSING_EOM;
+	}
+	buf.append(std::begin(_source) + _at, std::begin(_source) + end);
+	n = end - _at;
+	_at = end;
+	if (check_eom && buf.back() == DEFAULT_EOM) {
+		n--;
+		buf.pop_back();
+		_found_eom = true;
+		_finished = true;
+	}
+	return net::action_status::OK;
+}
+
+bool string_source::is_skippable(char c) const {
+	return std::isspace(c) && c != DEFAULT_EOM;
+}
+
+udp_source::udp_source(const std::string_view& source) : string_source(source) {}
+udp_source::udp_source(std::string_view&& source) : string_source(std::move(source)) {}
+
+bool udp_source::is_skippable(char c) const {
+	return c == DEFAULT_SEP;
+}
+
 std::string net::status_to_message(action_status status) {
 	std::string res = "get_error_message failed";
 	switch (status) {
