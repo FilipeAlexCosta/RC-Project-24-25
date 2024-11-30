@@ -146,6 +146,16 @@ out_stream& out_stream::write(const field& f) {
 	return *this;
 }
 
+out_stream& out_stream::write(char c) {
+	if (_primed)
+		_primed = false;
+	_buf.push_back(c);
+	_buf.push_back(DEFAULT_SEP);
+	return *this;
+}
+
+
+
 out_stream& out_stream::write_and_fill(const field& f, size_t n, char fill) {
 	if (_primed)
 		_primed = false;

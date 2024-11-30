@@ -224,6 +224,7 @@ private:
 
 struct out_stream {
 	out_stream& write(const field& f);
+	out_stream& write(char c);
 	out_stream& write_and_fill(const field& f, size_t n, char fill);
 	out_stream& prime();
 	const std::string_view view() const;
