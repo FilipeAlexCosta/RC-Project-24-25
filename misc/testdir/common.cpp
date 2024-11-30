@@ -138,6 +138,38 @@ bool udp_source::is_skippable(char c) const {
 	return c == DEFAULT_SEP;
 }
 
+out_stream& out_stream::write(const field& f) {
+	if (_primed)
+		_primed = false;
+	_buf.append(std::begin(f), std::end(f));
+	_buf.push_back(DEFAULT_SEP);
+	return *this;
+}
+
+out_stream& out_stream::write_and_fill(const field& f, size_t n, char fill) {
+	if (_primed)
+		_primed = false;
+	if (n > f.size())
+		_buf.insert(_buf.size(), n - f.size(), fill);
+	_buf.append(std::begin(f), std::end(f));
+	_buf.push_back(DEFAULT_SEP);
+	return *this;
+}
+
+out_stream& out_stream::prime() {
+	if (_primed)
+		return *this;
+	if (!_buf.empty())
+		_buf.back() = DEFAULT_EOM;
+	else
+		_buf.push_back(DEFAULT_EOM);
+	return *this;
+}
+
+const std::string_view out_stream::view() const {
+	return _buf;
+}
+
 std::string net::status_to_message(action_status status) {
 	std::string res = "get_error_message failed";
 	switch (status) {
@@ -242,17 +274,15 @@ std::string net::status_to_message(action_status status) {
 	return res;
 }
 
-action_status net::udp_request(const char* req, uint32_t req_sz, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read) {
+action_status net::udp_request(const out_stream& out_str, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read) {
+	auto msg = out_str.view();
 	for (int retries = 0; retries < MAX_RESEND; retries++) {
-		read = sendto(udp_info.socket_fd, req, req_sz, 0, udp_info.receiver_info->ai_addr, udp_info.receiver_info->ai_addrlen);
+		read = sendto(udp_info.socket_fd, msg.data(), msg.size(), 0, udp_info.receiver_info->ai_addr, udp_info.receiver_info->ai_addrlen);
 		if (read == -1)
 			return net::action_status::SEND_ERR;
 		read = recvfrom(udp_info.socket_fd, ans, ans_sz, 0, (struct sockaddr*) &udp_info.sender_addr, &udp_info.sender_addr_len);
-		if (read >= 0) {
-			if (read == 0 || ans[--read] != DEFAULT_EOM)
-				return net::action_status::MISSING_EOM;
+		if (read >= 0)
 			return net::action_status::OK;
-		}
 		if (errno != EWOULDBLOCK && errno != EAGAIN)
 			return net::action_status::RECV_ERR;
 	}
@@ -280,83 +310,6 @@ action_status net::tcp_request(const char* req, uint32_t req_sz, net::socket_con
 	return net::action_status::OK;
 }
 
-std::pair<action_status, message> net::get_fields(const char* buf, size_t buf_sz, std::initializer_list<int> field_szs) {
-	message fields;
-	fields.reserve(std::size(field_szs));
-	size_t i = 0;
-	for (; i < buf_sz && std::isspace(buf[i]); i++);
-	for (auto size : field_szs) {
-		if (size < 0) {
-			for (; i < buf_sz && std::isspace(buf[i]); i++);
-			size = 1;
-			for (; (size + i) < buf_sz && (!std::isspace(buf[size + i])); size++);
-		}
-		size_t next_sep = i + size;
-		if (next_sep >= buf_sz) {
-			if (next_sep != buf_sz)
-				return {net::action_status::MISSING_ARG, fields};
-			fields.push_back(std::string_view(buf + i, size));
-			i = next_sep + 1;
-			continue;
-		}
-		if (!std::isspace(buf[next_sep]))
-			return {net::action_status::BAD_ARG, fields};
-		fields.push_back(std::string_view(buf + i, size));
-		i = next_sep + 1;
-		for (; i < buf_sz && std::isspace(buf[i]); i++);
-	}
-	if (i < buf_sz)
-		return {net::action_status::EXCESS_ARGS, fields};
-	return {net::action_status::OK, fields};
-}
-
-std::pair<action_status, message> net::get_fields_strict(const char* buf, size_t buf_sz, std::initializer_list<int> field_szs, char sep) {
-	message fields;
-	fields.reserve(std::size(field_szs));
-	size_t i = 0;
-	if (buf_sz > 0 && buf[0] == sep)
-		return {net::action_status::ERR, fields};
-	for (auto size : field_szs) {
-		if (size < 0) {
-			size = 0;
-			for (; (size + i) < buf_sz && buf[size + i] != sep; size++);
-		}
-		size_t next_sep = i + size;
-		if (next_sep >= buf_sz) {
-			if (next_sep != buf_sz)
-				return {net::action_status::MISSING_ARG, fields};
-			fields.push_back(std::string_view(buf + i, size));
-			i = next_sep + 1;
-			continue;
-		}
-		if (buf[next_sep] != sep)
-			return {net::action_status::BAD_ARG, fields};
-		fields.push_back(std::string_view(buf + i, size));
-		i = next_sep + 1;
-	}
-	if (i <= buf_sz)
-		return {net::action_status::ERR, fields};
-	return {net::action_status::OK, fields};
-}
-
-int net::prepare_buffer(char* buf, int buf_sz, message msg, char sep, char eom) {
-	uint32_t i = 0;
-	size_t fld_i = 0;
-	for (; fld_i < msg.size() - 1; fld_i++) {
-		if (i + std::size(msg[fld_i]) >= buf_sz)
-			return - 1;
-		for (char c : msg[fld_i])
-			buf[i++] = c;
-		buf[i++] = sep;
-	}
-	if (std::size(msg) != 0 && i + std::size(msg[fld_i]) >= buf_sz)
-		return - 1;
-	for (char c : msg[fld_i])
-		buf[i++] = c;
-	buf[i++] = eom;
-	return i;
-}
-
 action_status net::is_valid_plid(const field& field) {
 	if (field.length() != PLID_SIZE) // PLID has 6 digits
 		return net::action_status::BAD_ARG;
@@ -375,8 +328,8 @@ action_status net::is_valid_max_playtime(const field& field) {
 	} catch (const std::invalid_argument& err) { // cannot be read
 		return net::action_status::BAD_ARG;
 	} // out_of_range exception shouldn't be an issue
-	/*if (max_playtime < 0 || max_playtime > 600) // check <= 600
-		return net::action_status::BAD_ARG;*/
+	if (max_playtime < 0 || max_playtime > 600)
+		return net::action_status::BAD_ARG;
 	return net::action_status::OK;
 }
 

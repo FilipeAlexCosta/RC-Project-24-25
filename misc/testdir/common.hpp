@@ -16,12 +16,13 @@
 #include <initializer_list>
 
 #define DEFAULT_SEP ' '
-#define DEFAULT_EOM '\t'
+#define DEFAULT_EOM '\n'
 #define PLID_SIZE 6
 #define MAX_PLAYTIME_SIZE 3
 #define UDP_MSG_SIZE 128
 #define MAX_RESEND 3
 #define MAX_TRIALS '8'
+#define GUESS_SIZE 4
 
 namespace net {
 struct socket_context {
@@ -104,7 +105,7 @@ struct udp_source : public string_source {
 	bool is_skippable(char c) const;
 };
 
-using field = std::string_view;
+using field = std::string;
 using message = std::vector<field>;
 
 template<typename SOURCE>
@@ -112,10 +113,10 @@ struct stream {
 	stream(const SOURCE& source, bool strict = true) : _source(source), _strict(strict) {}
 	stream(SOURCE&& source, bool strict = true) : _source(std::move(source)), _strict(strict) {}
 
-	std::pair<action_status, std::vector<std::string>> read(std::initializer_list<std::pair<size_t, size_t>> lens) {
-		std::vector<std::string> msg;
+	std::pair<action_status, message> read(std::initializer_list<std::pair<size_t, size_t>> lens, bool check_eom = true) {
+		message msg;
 		for (auto len : lens) {
-			auto [res, fld] = read(len.first, len.second);
+			auto [res, fld] = read(len.first, len.second, check_eom);
 			msg.push_back(fld);
 			if (res != action_status::OK)
 				return {res, msg};
@@ -128,7 +129,7 @@ struct stream {
 			return {action_status::OK, {}};
 		if (_source.found_eom())
 			return {action_status::MISSING_ARG, {}};
-		std::string buf;
+		field buf;
 		size_t bytes_read = 0;
 		size_t off = 0;
 		if (!_strict) {
@@ -173,7 +174,7 @@ struct stream {
 	action_status no_more_fields() {
 		if (_source.found_eom())
 			return net::action_status::OK;
-		std::string buf;
+		field buf;
 		while (true) {
 			size_t bytes_read = 0;
 			auto res = _source.read_len(buf, 1, bytes_read, true);
@@ -191,7 +192,7 @@ struct stream {
 
 	action_status exhaust() {
 		while (!_source.finished()) {
-			std::string buf;
+			field buf;
 			size_t bytes_read = 0;
 			_source.read_len(buf, 1, bytes_read, true);
 		}
@@ -203,31 +204,39 @@ struct stream {
 	bool found_eom() const {
 		return _source.found_eom();
 	}
+
+	bool finished() const {
+		return _source.finished();
+	}
+
+	action_status check_strict_end() const {
+		if (_source.finished()) {
+			if (_source.found_eom())
+				return net::action_status::OK;
+			return net::action_status::MISSING_EOM;
+		}
+		return net::action_status::BAD_ARG; // TODO: maybe SEP_ERR instead
+	}
 private:
 	SOURCE _source;
 	bool _strict;
 };
 
+struct out_stream {
+	out_stream& write(const field& f);
+	out_stream& write_and_fill(const field& f, size_t n, char fill);
+	out_stream& prime();
+	const std::string_view view() const;
+private:
+	std::string _buf;
+	bool _primed = false;
+};
+
 std::string status_to_message(action_status status);
 
-action_status udp_request(const char* req, uint32_t req_sz, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read);
+action_status udp_request(const out_stream& out_str, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read);
 
 action_status tcp_request(const char* req, uint32_t req_sz, net::socket_context& tcp_info, char* ans, uint32_t ans_sz, int& r);
-
-std::pair<action_status, message> get_fields(
-	const char* buf,
-	size_t buf_sz,
-	std::initializer_list<int> field_szs
-);
-
-std::pair<action_status, message> get_fields_strict(
-	const char* buf,
-	size_t buf_sz,
-	std::initializer_list<int> field_szs,
-	char sep = DEFAULT_SEP
-);
-
-int prepare_buffer(char* buf, int buf_sz, message msg, char sep = DEFAULT_SEP, char eom = DEFAULT_EOM);
 
 action_status is_valid_plid(const field& field);
 
@@ -237,9 +246,10 @@ action_status is_valid_color(const field& field);
 
 void fill_max_playtime(char res[MAX_PLAYTIME_SIZE], const field& max_playtime);
 
-template<typename... Args>
+template<typename SOURCE, typename... ARGS>
 struct action_map {
-	using action = std::function<action_status(const std::string&, Args...)>;
+	using arg_stream = stream<SOURCE>;
+	using action = std::function<action_status(arg_stream&, ARGS...)>;
 
 	void add_action(const std::string_view& name, const action& action) {
 		_actions.insert({std::move(static_cast<std::string>(name)), action});
@@ -250,17 +260,14 @@ struct action_map {
 			add_action(name, action);
 	}
 
-	action_status execute(const std::string& command, Args... args) const {
-		size_t from  = 0;
-		for (; from < command.size() && std::isspace(command[from]); from++);
-		if (from > command.size())
-			return action_status::UNK_ACTION;
-		size_t to = from + 1;
-		for (; to < command.size() && (!std::isspace(command[to])); to++);
-		auto it = _actions.find(std::string(std::begin(command) + from, std::begin(command) + to));
+	action_status execute(arg_stream& strm, ARGS... args) const {
+		auto [status, comm] = strm.read(1, SIZE_MAX);
+		if (status != action_status::OK)
+			return status;
+		auto it = _actions.find(comm);
 		if (it == _actions.end())
 			return action_status::UNK_ACTION;
-		return it->second(command, args...);
+		return it->second(strm, args...);
 	}
 private:
 	std::unordered_map<std::string, action> _actions;
