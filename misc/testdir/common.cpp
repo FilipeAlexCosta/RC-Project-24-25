@@ -4,7 +4,7 @@
 
 using namespace net;
 
-socket_context::socket_context(const std::string_view& rec_addr, const std::string_view& rec_port, int type) {
+socket_context::socket_context(const std::string_view& rec_addr, const std::string_view& rec_port, int type, size_t timeout) {
 	socket_fd = socket(AF_INET, type, 0);
 	if (socket_fd == -1)
 		return;
@@ -18,6 +18,26 @@ socket_context::socket_context(const std::string_view& rec_addr, const std::stri
 		socket_fd = -1;
 		return;
 	}
+
+	if (type == SOCK_STREAM && connect(socket_fd, receiver_info->ai_addr, receiver_info->ai_addrlen) != 0) {
+		freeaddrinfo(receiver_info);
+		close(socket_fd);
+		socket_fd = -1;
+		return;
+	}
+	
+	if (timeout == 0)
+		return;
+
+	timeval t;
+	t.tv_sec = timeout; // s second timeout
+	t.tv_usec = 0;
+	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1) {
+		freeaddrinfo(receiver_info);
+		close(socket_fd);
+		socket_fd = -1;
+		return;
+	}
 }
 
 socket_context::~socket_context() {
@@ -25,17 +45,6 @@ socket_context::~socket_context() {
 		return;
 	freeaddrinfo(receiver_info);
 	close(socket_fd);
-}
-
-int socket_context::set_timeout(size_t s) {
-	struct timeval timeout;
-	timeout.tv_sec = s; // s second timeout
-	timeout.tv_usec = 0;
-	return setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1;
-}
-
-int socket_context::tcp_connect() {
-	return connect(socket_fd, receiver_info->ai_addr, receiver_info->ai_addrlen);
 }
 
 bool socket_context::is_valid() {
@@ -275,6 +284,9 @@ std::string net::status_to_message(action_status status) {
 		case action_status::TRY_ETM:
 			res = "Maximum play time achieved, you lost the game";
 			break;
+		case action_status::CONN_ERR:
+			res = "Could not connect to server (check address and port)";
+			break;
 		default:
 			res = "Unknown error";
 	}
@@ -297,10 +309,7 @@ action_status net::udp_request(const out_stream& out_str, net::socket_context& u
 }
 
 std::pair<action_status, stream<tcp_source>> net::tcp_request(const out_stream& out_str, net::socket_context& tcp_info) {
-	int done = tcp_info.tcp_connect();
-	if (done != 0)
-		return {action_status::SEND_ERR, {-1}};
-	done = 0;
+	int done = 0;
 	auto view = out_str.view();
 	while (done < view.size()) {
 		int n = write(tcp_info.socket_fd, view.data() + done, view.size() - done);
