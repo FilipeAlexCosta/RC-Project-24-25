@@ -36,6 +36,7 @@ struct socket_context {
 
 	int set_timeout(size_t s);
 	bool is_valid();
+	int tcp_connect();
 };
 
 enum class action_status {
@@ -133,14 +134,14 @@ struct stream {
 		size_t bytes_read = 0;
 		size_t off = 0;
 		if (!_strict) {
-			auto res = _source.read_len(buf, 1, bytes_read, check_eom);
+			auto res = _source.read_len(buf, 1, bytes_read, true);
 			if (res != action_status::OK)
 				return {res, buf};
 			if (bytes_read == 0)
 				return {net::action_status::MISSING_ARG, {}};
 			while (_source.is_skippable(buf[0])) {
 				buf.clear();
-				res = _source.read_len(buf, 1, bytes_read, check_eom);
+				res = _source.read_len(buf, 1, bytes_read, true);
 				if (res != action_status::OK)
 					return {res, buf};
 				if (bytes_read == 0)
@@ -154,7 +155,7 @@ struct stream {
 		if (bytes_read < min_len - off)
 			return {net::action_status::BAD_ARG, buf};
 		for (size_t i = min_len; i < max_len; i++) {
-			res = _source.read_len(buf, 1, bytes_read, check_eom);
+			res = _source.read_len(buf, 1, bytes_read, true);
 			if (res != action_status::OK || bytes_read == 0)
 				return {res, buf};
 			if (_source.is_skippable(buf[i])) {
@@ -162,7 +163,7 @@ struct stream {
 				return {action_status::OK, buf};
 			}
 		}
-		res = _source.read_len(buf, 1, bytes_read, check_eom);
+		res = _source.read_len(buf, 1, bytes_read, true);
 		if (bytes_read == 0)
 			return {net::action_status::OK, buf};
 		if (!_source.is_skippable(buf[max_len]))
@@ -237,7 +238,7 @@ std::string status_to_message(action_status status);
 
 action_status udp_request(const out_stream& out_str, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read);
 
-action_status tcp_request(const char* req, uint32_t req_sz, net::socket_context& tcp_info, char* ans, uint32_t ans_sz, int& r);
+std::pair<action_status, stream<tcp_source>> tcp_request(const out_stream& out_str, net::socket_context& tcp_info);
 
 action_status is_valid_plid(const field& field);
 

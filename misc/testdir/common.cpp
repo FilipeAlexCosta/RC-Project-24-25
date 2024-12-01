@@ -18,13 +18,6 @@ socket_context::socket_context(const std::string_view& rec_addr, const std::stri
 		socket_fd = -1;
 		return;
 	}
-
-	if (type == SOCK_STREAM && connect(socket_fd, receiver_info->ai_addr, receiver_info->ai_addrlen) == -1) {
-		freeaddrinfo(receiver_info);
-		close(socket_fd);
-		socket_fd = -1;
-		return;
-	}
 }
 
 socket_context::~socket_context() {
@@ -39,6 +32,10 @@ int socket_context::set_timeout(size_t s) {
 	timeout.tv_sec = s; // s second timeout
 	timeout.tv_usec = 0;
 	return setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1;
+}
+
+int socket_context::tcp_connect() {
+	return connect(socket_fd, receiver_info->ai_addr, receiver_info->ai_addrlen);
 }
 
 bool socket_context::is_valid() {
@@ -299,25 +296,19 @@ action_status net::udp_request(const out_stream& out_str, net::socket_context& u
 	return net::action_status::CONN_TIMEOUT;
 }
 
-action_status net::tcp_request(const char* req, uint32_t req_sz, net::socket_context& tcp_info, char* ans, uint32_t ans_sz, int& r) {
-	int n = 0;
-	while (r < req_sz) {
-		n = write(tcp_info.socket_fd, req, req_sz - r);
+std::pair<action_status, stream<tcp_source>> net::tcp_request(const out_stream& out_str, net::socket_context& tcp_info) {
+	int done = tcp_info.tcp_connect();
+	if (done != 0)
+		return {action_status::SEND_ERR, {-1}};
+	done = 0;
+	auto view = out_str.view();
+	while (done < view.size()) {
+		int n = write(tcp_info.socket_fd, view.data() + done, view.size() - done);
 		if (n <= 0)
-			return net::action_status::SEND_ERR;
-		r += n;
-		req += n;
+			return {action_status::SEND_ERR, {-1}};
+		done += n;
 	}
-
-	while (r < ans_sz) {
-		n = read(tcp_info.socket_fd, ans, ans_sz - r);
-		if (n <= 0)
-			return net::action_status::SEND_ERR;
-		r += n;
-		ans += n;
-	}
-
-	return net::action_status::OK;
+	return {net::action_status::OK, {tcp_info.socket_fd}};
 }
 
 action_status net::is_valid_plid(const field& field) {

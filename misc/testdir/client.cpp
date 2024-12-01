@@ -38,8 +38,8 @@ int main() {
 	net::action_map<net::file_source, net::socket_context&, net::socket_context&> actions;
 	actions.add_action("start", do_start);
 	actions.add_action("try", do_try);
-	/*actions.add_action({"show_trials", "st"}, do_show_trials);
-	actions.add_action({"scoreboard", "sb"}, do_scoreboard);*/
+	/*actions.add_action({"show_trials", "st"}, do_show_trials);*/
+	actions.add_action({"scoreboard", "sb"}, do_scoreboard);
 	actions.add_action("quit", do_quit);
 	actions.add_action("exit", do_exit);
 	actions.add_action("debug", do_debug);
@@ -368,6 +368,80 @@ static net::action_status do_debug(net::stream<net::file_source>& msg, net::sock
 		return net::action_status::DEBUG_ERR;
 
 	return net::action_status::UNK_STATUS;
+}
+
+/*static net::action_status do_show_trials(net::stream<net::file_source>& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
+	auto res = msg.no_more_fields();
+	if (res != net::action_status::OK)
+		return res;
+	if (!in_game)
+		return net::action_status::NOT_IN_GAME;
+		
+	net::out_stream out_strm;
+	out_strm.write("STR").write(current_plid).prime();
+	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
+
+	auto [ans_ok, ans_strm] = net::tcp_request(out_strm, tcp_info);
+	if (ans_ok != net::action_status::OK)
+		return ans_ok;
+
+	char ans_buf[UDP_MSG_SIZE];
+	int ans_bytes = -1;
+	status = net::tcp_request(req_buf, n_bytes, tcp_info, ans_buf, 4, ans_bytes);
+	if (status != net::action_status::OK)
+		return status;
+	
+	std::cout << "Received buffer: \"" << ans_buf;
+	return net::action_status::OK;
+}*/
+
+static net::action_status do_scoreboard(net::stream<net::file_source>& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
+	auto res = msg.no_more_fields();
+	if (res != net::action_status::OK)
+		return res;
+		
+	net::out_stream out_strm;
+	out_strm.write("SSB").prime();
+	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
+
+	auto [ans_ok, ans_strm] = net::tcp_request(out_strm, tcp_info);
+	if (ans_ok != net::action_status::OK)
+		return ans_ok;
+	auto fld = ans_strm.read(3, 3);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	if (fld.second != "RSS") {
+		if (fld.second == "ERR")
+			return net::action_status::RET_ERR;
+		return net::action_status::UNK_REPLY;
+	}
+	fld = ans_strm.read(2, 5);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	if (fld.second == "EMPTY") {
+		if ((fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
+			return fld.first;
+		std::cout << "The scoreboard is empty." << std::endl;
+		return net::action_status::OK;
+	}
+	if (fld.second != "OK")
+		return net::action_status::UNK_STATUS;
+	fld = ans_strm.read(1, 24);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	std::cout << "Name of scoreboard: " << fld.second << std::endl;
+	fld = ans_strm.read(1, 4);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	std::cout << "Size of scoreboard file: " << fld.second << std::endl;
+	auto fsize = std::stoul(fld.second.c_str());
+	fld = ans_strm.read(fsize, fsize, false);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	std::cout << "Scoreboard: " << fld.second << std::endl;
+	if ((fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
+		return fld.first;
+	return net::action_status::OK;
 }
 
 /*static net::action_status do_show_trials(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
