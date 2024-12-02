@@ -2,7 +2,8 @@
 #include <iostream>
 #include <cstring>
 
-#define PORT "58011"
+#define DEFAULT_PORT "58016"
+#define DEFAULT_HOST "localhost"
 #define TIMEOUT 5
 
 static bool in_game = false;
@@ -18,13 +19,42 @@ static net::action_status do_quit(net::stream<net::file_source>& msg, std::strin
 static net::action_status do_exit(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
 static net::action_status do_debug(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
 
-int main() {
-	std::string host = "tejo.tecnico.ulisboa.pt";
-	std::string port = PORT;
+int main(int argc, char** argv) {
+	int argi = 1;
+	bool read_gsip = false;
+	bool read_gsport = false;
+	std::string host = DEFAULT_HOST;
+	std::string port = DEFAULT_PORT;
+	while (argi < argc - 1) {
+		std::string_view arg{argv[argi]};
+		if (arg == "-n") {
+			if (read_gsip) {
+				std::cout << "Can only set host once." << std::endl;
+				return 1;
+			}
+			host = argv[argi + 1];
+			argi += 2;
+			read_gsip = true;
+			continue;
+		}
+		if (arg == "-p") {
+			if (read_gsport) {
+				std::cout << "Can only set port once." << std::endl;
+				return 1;
+			}
+			port = argv[argi + 1];
+			argi += 2;
+			read_gsport = true;
+			continue;
+		}
+		std::cout << "Unknown CLI argument." << std::endl;
+		return 1;
+	}
+
 	net::action_map<net::file_source, std::string_view, std::string_view> actions;
 	actions.add_action("start", do_start);
 	actions.add_action("try", do_try);
-	/*actions.add_action({"show_trials", "st"}, do_show_trials);*/
+	actions.add_action({"show_trials", "st"}, do_show_trials);
 	actions.add_action({"scoreboard", "sb"}, do_scoreboard);
 	actions.add_action("quit", do_quit);
 	actions.add_action("exit", do_exit);
@@ -371,7 +401,31 @@ static net::action_status do_debug(net::stream<net::file_source>& msg, std::stri
 	return net::action_status::UNK_STATUS;
 }
 
-/*static net::action_status do_show_trials(net::stream<net::file_source>& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
+static net::action_status read_file(net::stream<net::tcp_source>& ans_strm, net::field& name, size_t& fsize, net::field& file) {
+	auto fld = ans_strm.read(1, 24);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	name = std::move(fld.second);
+
+	fld = ans_strm.read(1, 4);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	try {
+		fsize = std::stoul(fld.second.c_str());
+	} catch (std::invalid_argument&) {
+		return net::action_status::BAD_ARG;
+	} catch (std::out_of_range&) {
+		return net::action_status::BAD_ARG;
+	}
+
+	fld = ans_strm.read(fsize, fsize, false);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	file = std::move(fld.second);
+	return net::action_status::OK;
+}
+
+static net::action_status do_show_trials(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
 	auto res = msg.no_more_fields();
 	if (res != net::action_status::OK)
 		return res;
@@ -382,19 +436,43 @@ static net::action_status do_debug(net::stream<net::file_source>& msg, std::stri
 	out_strm.write("STR").write(current_plid).prime();
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
+	net::socket_context tcp_info{host, port, SOCK_STREAM};
+	if (!tcp_info.is_valid())
+		return net::action_status::CONN_ERR;
 	auto [ans_ok, ans_strm] = net::tcp_request(out_strm, tcp_info);
 	if (ans_ok != net::action_status::OK)
 		return ans_ok;
 
-	char ans_buf[UDP_MSG_SIZE];
-	int ans_bytes = -1;
-	status = net::tcp_request(req_buf, n_bytes, tcp_info, ans_buf, 4, ans_bytes);
-	if (status != net::action_status::OK)
-		return status;
-	
-	std::cout << "Received buffer: \"" << ans_buf;
+	auto fld = ans_strm.read(3, 3);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	if (fld.second != "RST") {
+		if (fld.second == "ERR")
+			return net::action_status::RET_ERR;
+		return net::action_status::UNK_REPLY;
+	}
+	fld = ans_strm.read(3, 3);
+	if (fld.first != net::action_status::OK)
+		return fld.first;
+	if (fld.second == "NOK") {
+		if ((fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
+			return fld.first;
+		std::cout << "The specified user has no recorded games (or a problem may have occured)" << std::endl;
+		return net::action_status::OK;
+	}
+	if (fld.second != "FIN" && fld.second != "ACT")
+		return net::action_status::UNK_STATUS;
+	net::field fname, file;
+	size_t fsize = 0;
+	fld.first = read_file(ans_strm, fname, fsize, file);
+	if (fld.first != net::action_status::OK || (fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
+		return fld.first;
+	std::cout << "Name of trial file: " << fname << std::endl;
+	std::cout << "Size of trial file: " << fsize << std::endl;
+	std::cout << "Trials: " << file << std::endl;
 	return net::action_status::OK;
-}*/
+
+}
 
 static net::action_status do_scoreboard(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
 	auto res = msg.no_more_fields();
@@ -430,21 +508,14 @@ static net::action_status do_scoreboard(net::stream<net::file_source>& msg, std:
 	}
 	if (fld.second != "OK")
 		return net::action_status::UNK_STATUS;
-	fld = ans_strm.read(1, 24);
-	if (fld.first != net::action_status::OK)
+	net::field fname, file;
+	size_t fsize = 0;
+	fld.first = read_file(ans_strm, fname, fsize, file);
+	if (fld.first != net::action_status::OK || (fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
 		return fld.first;
-	std::cout << "Name of scoreboard: " << fld.second << std::endl;
-	fld = ans_strm.read(1, 4);
-	if (fld.first != net::action_status::OK)
-		return fld.first;
-	std::cout << "Size of scoreboard file: " << fld.second << std::endl;
-	auto fsize = std::stoul(fld.second.c_str());
-	fld = ans_strm.read(fsize, fsize, false);
-	if (fld.first != net::action_status::OK)
-		return fld.first;
-	std::cout << "Scoreboard: " << fld.second << std::endl;
-	if ((fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
-		return fld.first;
+	std::cout << "Name of scoreboard: " << fname << std::endl;
+	std::cout << "Size of scoreboard file: " << fsize << std::endl;
+	std::cout << "Scoreboard: " << file << std::endl;
 	return net::action_status::OK;
 }
 
