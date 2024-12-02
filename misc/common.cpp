@@ -399,20 +399,10 @@ void net::fill_max_playtime(char res[MAX_PLAYTIME_SIZE], const field& max_playti
 
 action_status net::is_valid_color(const field& field) {
 	if (field.length() != 1)
-		return net::action_status::BAD_ARG;
-	action_status res;
-	switch (field[0]) {
-		case 'R':
-		case 'G':
-		case 'B':
-		case 'Y':
-		case 'O':
-		case 'P':
-			res = net::action_status::OK;
-			break;
+        return action_status::BAD_ARG;
+    
+    if (valid_colors.find(field[0]) != valid_colors.end())
+        return action_status::OK;
 
-		default:
-			res = net::action_status::BAD_ARG;
-	}
-	return res;
+    return action_status::BAD_ARG;
 }

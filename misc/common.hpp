@@ -10,6 +10,7 @@
 #include <netdb.h>
 
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
 #include <string>
 #include <cstring>
@@ -25,6 +26,8 @@
 #define GUESS_SIZE 4
 #define DEFAULT_TIMEOUT 5
 #define DEFAULT_LISTEN_CONNS 5
+
+const std::unordered_set<char> valid_colors = {'R', 'G', 'B', 'Y', 'O', 'P'};
 
 namespace net {
 struct socket_context {

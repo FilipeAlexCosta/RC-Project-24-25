@@ -1,10 +1,19 @@
 #include "common.hpp"
 #include <iostream>
 #include <ctime>
+#include <fstream>
 
 #define PORT "58011"
 
 static bool exit_server = false;
+
+/* Current player data */
+static bool in_game = false;
+static int PLID;
+static int max_playtime;
+static std::time_t start_time;
+static char current_trial = '0';
+static std::string secret_key;
 
 /* signal(SIGPIPE, SIG_IGN)
  * signal(SIGCHILD, SIG_IGN) ignorar estes 2 sinais
@@ -20,10 +29,7 @@ static bool exit_server = false;
  * }
  */
 
-static net::action_status start_new_game(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info);
-
-
-struct Game { 
+/*struct Game { 
 	int player_plid;
 	int playtime;
 	std::string secret_key;
@@ -44,67 +50,56 @@ static std::unordered_map<int, Game> ongoing_games;
 
 static bool has_ongoing_game(int plid) { // TODO: incorporate this in template ?
 	return ongoing_games.find(plid) != ongoing_games.end();
-}
+}*/
+
+static net::action_status start_new_game(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
 
 int main() {
 	srand(time(0));
-
-	net::socket_context udp_info{"tejo.tecnico.ulisboa.pt", PORT, SOCK_DGRAM};
-	if (!udp_info.is_valid()) {
-		std::cout << "Failed to create udp socket. Check if the provided address and port are correct.\n";
-		return 1;
-	}
-
-	if (udp_info.set_timeout(UDP_TIMEOUT)) {
-		std::cout << "Failed to set udp socket's timeout.\n"; 
-		return 1;
-	}
 	
-	net::action_map<net::socket_context&, net::socket_context&> actions;
+	net::action_map<net::file_source, std::string_view, std::string_view> actions;
 	actions.add_action("SNG", start_new_game);
 	while (!exit_server)  	{
-		std::string input;
-		std::getline(std::cin, input);
-		auto status = actions.execute(input, udp_info, udp_info);
+		net::stream<net::file_source> strm{STDIN_FILENO, false};
+		auto status = actions.execute(strm, "", PORT);
 		if (status != net::action_status::OK) {
 			std::cerr << net::status_to_message(status) << ".\n";
 		}
-		 
 	}
-	
 
 	std::cout << "Exiting the Server application...\n";
 	return 0;
 }
 
-static net::action_status start_new_game(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
-	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {3, PLID_SIZE, -1});
+static net::action_status start_new_game(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
+	auto [status, fields] = msg.read({{4, 6}, {1, 3}});
+	if (status != net::action_status::OK || (status = msg.no_more_fields()) != net::action_status::OK)
+		return status;
+	status = net::is_valid_plid(fields[0]);
 	if (status != net::action_status::OK)
 		return status;
 	
-	status = net::is_valid_plid(fields[1]);
+	status = net::is_valid_max_playtime(fields[1]);
 	if (status != net::action_status::OK)
 		return status;
-
-	status = net::is_valid_max_playtime(fields[2]);
-	if (status != net::action_status::OK)
-		return status;
-
-	int plid = std::stoi(std::string(fields[1]));
-	int playtime = std::stoi(std::string(fields[2]));
-	if (has_ongoing_game(plid)) {
+	int plid = std::stoi(fields[0]);
+	int playtime = std::stoi(fields[1]);
+	if (in_game)
 		return net::action_status::ONGOING_GAME;
-	}
 
+	std::vector<char> color_vector(valid_colors.begin(), valid_colors.end());
 	std::string key;
 	for (int i = 0; i < 4; i++) {
 		if(!key.empty())
 			key += ' ';
-		key += valid_colors[rand() % valid_colors.size()];
+		key += color_vector[rand() % valid_colors.size()];
 	}
 	std::cout << plid << "\t" << playtime << "\t" << key <<"\n";
 	
-	ongoing_games.emplace(plid, Game(plid, playtime, key));
-
+	PLID = plid;
+	max_playtime = playtime;
+	start_time = std::time(nullptr);
+	secret_key = key;
+	in_game = true;
 	return net::action_status::OK;
 }
