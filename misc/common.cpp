@@ -40,6 +40,49 @@ socket_context::socket_context(const std::string_view& rec_addr, const std::stri
 	}
 }
 
+socket_context::socket_context(const std::string_view& rec_port, int type, size_t timeout) {
+	socket_fd = socket(AF_INET, type, 0);
+	if (socket_fd == -1)
+		return;
+	addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = type;
+	hints.ai_flags = SOCK_DGRAM;
+
+	if (getaddrinfo(NULL, rec_port.data(), &hints, &receiver_info) != 0) {
+		close(socket_fd);
+		socket_fd = -1;
+		return;
+	}
+
+	if (bind(socket_fd, receiver_info->ai_addr, receiver_info->ai_addrlen) != 0) {
+		close(socket_fd);
+		socket_fd = -1;
+		return;
+	}
+
+	if (type == SOCK_STREAM && listen(socket_fd, DEFAULT_LISTEN_CONNS) != 0) {
+		freeaddrinfo(receiver_info);
+		close(socket_fd);
+		socket_fd = -1;
+		return;
+	}
+	
+	if (timeout == 0)
+		return;
+
+	timeval t;
+	t.tv_sec = timeout; // s second timeout
+	t.tv_usec = 0;
+	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1) {
+		freeaddrinfo(receiver_info);
+		close(socket_fd);
+		socket_fd = -1;
+		return;
+	}
+}
+
 socket_context::~socket_context() {
 	if (socket_fd == -1)
 		return;
@@ -286,6 +329,9 @@ std::string net::status_to_message(action_status status) {
 			break;
 		case action_status::CONN_ERR:
 			res = "Could not connect to server (check address and port)";
+			break;
+		case action_status::PERSIST_ERR:
+			res = "Could not write the file to disk";
 			break;
 		default:
 			res = "Unknown error";

@@ -24,6 +24,7 @@
 #define MAX_TRIALS '8'
 #define GUESS_SIZE 4
 #define DEFAULT_TIMEOUT 5
+#define DEFAULT_LISTEN_CONNS 5
 
 namespace net {
 struct socket_context {
@@ -32,7 +33,8 @@ struct socket_context {
 	sockaddr_in sender_addr;
 	socklen_t sender_addr_len = sizeof(sender_addr);
 
-	socket_context(const std::string_view& rec_addr, const std::string_view& rec_port, int type, size_t timeout = DEFAULT_TIMEOUT);
+	socket_context(const std::string_view& rec_addr, const std::string_view& rec_port, int type, size_t timeout);
+	socket_context(const std::string_view& rec_port, int type, size_t timeout);
 	~socket_context();
 
 	bool is_valid();
@@ -66,7 +68,7 @@ enum class action_status {
 	TRY_NOK,
 	TRY_ENT,
 	TRY_ETM,
-
+	PERSIST_ERR
 };
 
 struct source {

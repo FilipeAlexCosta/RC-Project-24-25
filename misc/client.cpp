@@ -1,6 +1,7 @@
 #include "common.hpp"
 #include <iostream>
 #include <cstring>
+#include <fstream>
 
 #define DEFAULT_PORT "58016"
 #define DEFAULT_HOST "localhost"
@@ -102,7 +103,7 @@ static net::action_status do_start(net::stream<net::file_source>& msg, std::stri
 
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context udp_info{host, port, SOCK_DGRAM};
+	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
 	if (!udp_info.is_valid())
 		return net::action_status::CONN_ERR;
 	char ans_buf[UDP_MSG_SIZE];
@@ -164,7 +165,7 @@ static net::action_status do_try(net::stream<net::file_source>& msg, std::string
 
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context udp_info{host, port, SOCK_DGRAM};
+	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
 	if (!udp_info.is_valid())
 		return net::action_status::CONN_ERR;
 	char ans_buf[UDP_MSG_SIZE];
@@ -291,7 +292,7 @@ static net::action_status end_game(net::socket_context& udp_info) {
 	if (res.second != "OK")
 		return net::action_status::UNK_STATUS;
 
-	in_game = false;
+	in_game = false; // TODO: should probably quit even in case of error?
 	char correct_guess[2 * GUESS_SIZE];
 	for (size_t i = 0; i < 2 * GUESS_SIZE; i += 2) {
 		res = ans_strm.read(1, 1);
@@ -320,7 +321,7 @@ static net::action_status do_quit(net::stream<net::file_source>& msg, std::strin
 	if (!in_game)
 		return net::action_status::NOT_IN_GAME;
 
-	net::socket_context udp_info{host, port, SOCK_DGRAM};
+	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
 	if (!udp_info.is_valid())
 		return net::action_status::CONN_ERR;
 	return end_game(udp_info);
@@ -336,10 +337,11 @@ static net::action_status do_exit(net::stream<net::file_source>& msg, std::strin
 		return net::action_status::OK;
 	}
 
-	net::socket_context udp_info{host, port, SOCK_DGRAM};
+	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
 	if (!udp_info.is_valid())
 		return net::action_status::CONN_ERR;
 	exit_app = ((res = end_game(udp_info)) == net::action_status::OK);
+	// TODO: should probably quit even in case of error?
 	return res;
 }
 
@@ -367,7 +369,7 @@ static net::action_status do_debug(net::stream<net::file_source>& msg, std::stri
 
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context udp_info{host, port, SOCK_DGRAM};
+	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
 	if (!udp_info.is_valid())
 		return net::action_status::CONN_ERR;
 	char ans_buf[UDP_MSG_SIZE];
@@ -407,7 +409,7 @@ static net::action_status do_debug(net::stream<net::file_source>& msg, std::stri
 	return net::action_status::UNK_STATUS;
 }
 
-static net::action_status read_file(net::stream<net::tcp_source>& ans_strm, net::field& name, size_t& fsize, net::field& file) {
+static net::action_status read_file(net::stream<net::tcp_source>& ans_strm, net::field& name, net::field& file) {
 	auto fld = ans_strm.read(1, 24);
 	if (fld.first != net::action_status::OK)
 		return fld.first;
@@ -416,6 +418,7 @@ static net::action_status read_file(net::stream<net::tcp_source>& ans_strm, net:
 	fld = ans_strm.read(1, 4);
 	if (fld.first != net::action_status::OK)
 		return fld.first;
+	size_t fsize = 0;
 	try {
 		fsize = std::stoul(fld.second.c_str());
 	} catch (std::invalid_argument&) {
@@ -431,6 +434,16 @@ static net::action_status read_file(net::stream<net::tcp_source>& ans_strm, net:
 	return net::action_status::OK;
 }
 
+static net::action_status write_file(const std::string& filename, const std::string& file) {
+	std::ofstream stream;
+	stream.open(filename, std::ofstream::out | std::ofstream::trunc);
+	if (!stream.is_open())
+		return net::action_status::PERSIST_ERR;
+	stream << file;
+	stream.close();
+	return net::action_status::OK;
+}
+
 static net::action_status do_show_trials(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
 	auto res = msg.no_more_fields();
 	if (res != net::action_status::OK)
@@ -442,7 +455,7 @@ static net::action_status do_show_trials(net::stream<net::file_source>& msg, std
 	out_strm.write("STR").write(current_plid).prime();
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context tcp_info{host, port, SOCK_STREAM};
+	net::socket_context tcp_info{host, port, SOCK_STREAM, 0};
 	if (!tcp_info.is_valid())
 		return net::action_status::CONN_ERR;
 	auto [ans_ok, ans_strm] = net::tcp_request(out_strm, tcp_info);
@@ -469,13 +482,11 @@ static net::action_status do_show_trials(net::stream<net::file_source>& msg, std
 	if (fld.second != "FIN" && fld.second != "ACT")
 		return net::action_status::UNK_STATUS;
 	net::field fname, file;
-	size_t fsize = 0;
-	fld.first = read_file(ans_strm, fname, fsize, file);
+	fld.first = read_file(ans_strm, fname, file);
 	if (fld.first != net::action_status::OK || (fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
 		return fld.first;
-	std::cout << "Name of trial file: " << fname << std::endl;
-	std::cout << "Size of trial file: " << fsize << std::endl;
-	std::cout << "Trials: " << file << std::endl;
+	write_file(fname, file);
+	std::cout << file << std::endl;
 	return net::action_status::OK;
 
 }
@@ -489,7 +500,7 @@ static net::action_status do_scoreboard(net::stream<net::file_source>& msg, std:
 	out_strm.write("SSB").prime();
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context tcp_info{host, port, SOCK_STREAM};
+	net::socket_context tcp_info{host, port, SOCK_STREAM, 0};
 	if (!tcp_info.is_valid())
 		return net::action_status::CONN_ERR;
 	auto [ans_ok, ans_strm] = net::tcp_request(out_strm, tcp_info);
@@ -516,11 +527,10 @@ static net::action_status do_scoreboard(net::stream<net::file_source>& msg, std:
 		return net::action_status::UNK_STATUS;
 	net::field fname, file;
 	size_t fsize = 0;
-	fld.first = read_file(ans_strm, fname, fsize, file);
+	fld.first = read_file(ans_strm, fname, file);
 	if (fld.first != net::action_status::OK || (fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
 		return fld.first;
-	std::cout << "Name of scoreboard: " << fname << std::endl;
-	std::cout << "Size of scoreboard file: " << fsize << std::endl;
-	std::cout << "Scoreboard: " << file << std::endl;
+	write_file(fname, file);
+	std::cout << file << std::endl;
 	return net::action_status::OK;
 }

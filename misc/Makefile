@@ -11,3 +11,6 @@ server: server.cpp common.cpp
 
 clean:
 	rm -f client server
+
+tejo:
+	./client -n tejo.tecnico.ulisboa.pt -p 58011
