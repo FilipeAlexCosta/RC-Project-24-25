@@ -191,10 +191,14 @@ static net::action_status do_try(net::stream<net::file_source>& msg, std::string
 
 	if (res.second == "DUP")
 		return net::action_status::TRY_DUP;
-	if (res.second == "INV") // TODO: close down or???
+	if (res.second == "INV") {
+		in_game = false;
 		return net::action_status::TRY_INV;
-	if (res.second == "NOK")
+	}
+	if (res.second == "NOK") {
+		in_game = false;
 		return net::action_status::TRY_NOK;
+	}
 	if (res.second == "ERR")
 		return net::action_status::TRY_ERR;
 
@@ -279,8 +283,10 @@ static net::action_status end_game(net::socket_context& udp_info) {
 	if (res.second == "ERR")
 		return net::action_status::QUIT_EXIT_ERR;
 
-	if (res.second == "NOK")
+	if (res.second == "NOK") {
+		in_game = false;
 		return net::action_status::NOT_IN_GAME;
+	}
 
 	if (res.second != "OK")
 		return net::action_status::UNK_STATUS;
@@ -518,51 +524,3 @@ static net::action_status do_scoreboard(net::stream<net::file_source>& msg, std:
 	std::cout << "Scoreboard: " << file << std::endl;
 	return net::action_status::OK;
 }
-
-/*static net::action_status do_show_trials(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
-	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
-	if (status != net::action_status::OK)
-		return status;
-	if (!in_game)
-		return net::action_status::NOT_IN_GAME;
-		
-	fields[0] = "STR";
-	fields.push_back(current_plid);
-
-	char req_buf[UDP_MSG_SIZE];
-	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
-
-	std::cout << "Sent buffer: \"" << req_buf << '\"';
-
-	char ans_buf[UDP_MSG_SIZE];
-	int ans_bytes = -1;
-	status = net::tcp_request(req_buf, n_bytes, tcp_info, ans_buf, 4, ans_bytes);
-	if (status != net::action_status::OK)
-		return status;
-	
-	std::cout << "Received buffer: \"" << ans_buf;
-	return net::action_status::OK;
-}
-
-static net::action_status do_scoreboard(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
-	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {-1});
-	if (status != net::action_status::OK)
-		return status;
-
-	fields[0] = "SSB";
-
-	char req_buf[UDP_MSG_SIZE];
-	int n_bytes = net::prepare_buffer(req_buf, (sizeof(req_buf) / sizeof(char)), fields);
-
-	std::cout << "Sent buffer: \"" << req_buf << '\"';
-
-	char ans_buf[UDP_MSG_SIZE];
-	int ans_bytes = -1;
-	status = net::udp_request(req_buf, n_bytes, tcp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
-	std::cout << "Received buffer: \"" << ans_buf;
-	if (status != net::action_status::OK)
-		return status;
-	
-	//std::cout << "Received buffer: \"" << ans_buf;
-	return net::action_status::OK;
-}*/
