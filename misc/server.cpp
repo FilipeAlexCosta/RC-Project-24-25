@@ -1,14 +1,10 @@
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <string.h>
-#include <signal.h>
+#include "common.hpp"
+#include <iostream>
+#include <ctime>
 
 #define PORT "58011"
+
+static bool exit_server = false;
 
 /* signal(SIGPIPE, SIG_IGN)
  * signal(SIGCHILD, SIG_IGN) ignorar estes 2 sinais
@@ -24,112 +20,91 @@
  * }
  */
 
-int main() { // NOT FUNCTIONAL
-	struct sockaddr_in addr;
-	socklen_t addrlen;
-	char buffer[128];
+static net::action_status start_new_game(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info);
 
-	struct sigaction act;
 
-	memset(&act, 0, size_of act);
-	act.sa_handler=SIG_IGN;
+struct Game { 
+	int player_plid;
+	int playtime;
+	std::string secret_key;
+	std::time_t start_time;
+	int trial_num;
 
-	if(sigaction(SIGPIPE, &act, NULL) == -1) // sigpipe
+	Game(int plid, int playtime, const std::string key)
+	 : player_plid(plid), playtime(playtime), secret_key(key),  start_time(std::time(nullptr)), trial_num(0) {};
+
+	bool hasEnded() const {
+		auto curr_time = std::time(nullptr);
+		auto played_time = std::difftime(curr_time, start_time);
+		return played_time >= playtime || trial_num > MAX_TRIALS;
+	};
+};
+
+static std::unordered_map<int, Game> ongoing_games;
+
+static bool has_ongoing_game(int plid) { // TODO: incorporate this in template ?
+	return ongoing_games.find(plid) != ongoing_games.end();
+}
+
+int main() {
+	srand(time(0));
+
+	net::socket_context udp_info{"tejo.tecnico.ulisboa.pt", PORT, SOCK_DGRAM};
+	if (!udp_info.is_valid()) {
+		std::cout << "Failed to create udp socket. Check if the provided address and port are correct.\n";
 		return 1;
-
-
-
-	
-
-	while (true) {
-		addrlen = sizeof(addr);
-		if ((n = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*) &addr, &addrlen)) == -1)
-			return 1;
-
-		write(1, "received: ", 10);
-		write(1, buffer, n);
-
-		if ((n = sendto(fd, buffer, n, 0, (struct sockaddr*) &addr, addrlen)) == -1)
-			return 1;
 	}
 
-	freeaddrinfo(res);
-	close(fd);
+	if (udp_info.set_timeout(UDP_TIMEOUT)) {
+		std::cout << "Failed to set udp socket's timeout.\n"; 
+		return 1;
+	}
+	
+	net::action_map<net::socket_context&, net::socket_context&> actions;
+	actions.add_action("SNG", start_new_game);
+	while (!exit_server)  	{
+		std::string input;
+		std::getline(std::cin, input);
+		auto status = actions.execute(input, udp_info, udp_info);
+		if (status != net::action_status::OK) {
+			std::cerr << net::status_to_message(status) << ".\n";
+		}
+		 
+	}
+	
+
+	std::cout << "Exiting the Server application...\n";
 	return 0;
 }
 
-static void startUDPServer() {
-	int fd_UDP, errcode;
-	ssize_t n_UDP;
-	struct addrinfo hints_UDP, *res_UDP;
-	struct sockaddr_in addr;
-	socklen_t addrlen;
-
-	if ((fd_UDP = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
-		return 1;
-	memset(&hints_UDP, 0, sizeof(hints_UDP));
-	hints_UDP.ai_family = AF_INET;
-	hints_UDP.ai_socktype = SOCK_DGRAM;
-	hints_UDP.ai_flags = AI_PASSIVE;
-
-	if ((errcode = getaddrinfo(NULL, PORT, &hints_UDP, &res_UDP)) != 0)
-		return 1;
-
-	if ((n_UDP = bind(fd_UDP, res_UDP->ai_addr, res_UDP->ai_addrlen)) == -1)
-		return 1;
-
-	while(true) {
-		nread = recvfrom(fd_UDP, buffer, size_of(buffer), 0, (struct sockaddr)* &addr, &addrlen);
-		if(nread == -1)
-			return 1;
-		//process command(...)
-		// ans = ...
-
-		n=sendto(fd_UDP, buffer, size_of(ans), 0, (struct sockaddr)&addr, &addrlen):
-		if(n==-1)
-			return 1;
-	}
-}
-
-static void startTCPServer() {
-	int fd_TCP, errcode;
-	ssize_t n_TCP;
-	struct addrinfo hints_TCP, *res_TCP;
-	struct sockaddr_in addr;
-	socklen_t addrlen;
-
-
-	if ((fd_TCP = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-		return 1;
-	memset(&hints_TCP, 0, sizeof(hints_TCP));
-	hints_TCP.ai_family = AF_INET;
-	hints_TCP.ai_socktype = SOCK_STREAM;
-	hints_TCP.ai_flags = AI_PASSIVE;
-
-	if ((errcode = getaddrinfo(NULL, PORT, &hints_TCP, &res_TCP)) != 0)
-		return 1;
+static net::action_status start_new_game(const std::string& msg, net::socket_context& udp_info, net::socket_context& tcp_info) {
+	auto [status, fields] = net::get_fields(msg.data(), msg.size(), {3, PLID_SIZE, -1});
+	if (status != net::action_status::OK)
+		return status;
 	
-	if ((n_TCP = bind(fd_TCP, res_TCP->ai_addr, res_TCP->ai_addrlen)) == -1)
-		return 1;
-	if(listen(fd_TCP, 5) == -1)
-		return 1;
+	status = net::is_valid_plid(fields[1]);
+	if (status != net::action_status::OK)
+		return status;
 
-	while(true) {
-		addrlen = size_of(addr);
-		if((newfd=accept(fd_TCP, (struct sockaddr*) &addr, &addrlen)) == -1)
-			return 1; 
-		while((n=read(newfd, buffer, size_of(buffer)) != 0)) {
-			if (n==-1)
-				return 1;
-			// process command (...)
-			// ans = ...
-			nwritten = 0
-			while (nwritten != sizeof(ans)) {
-				if((nw=write(newfd, ptr, n)) <= 0)
-					return 1;
-				nwritten += nw;
-			}
-			close(newfd);
-		}
+	status = net::is_valid_max_playtime(fields[2]);
+	if (status != net::action_status::OK)
+		return status;
+
+	int plid = std::stoi(std::string(fields[1]));
+	int playtime = std::stoi(std::string(fields[2]));
+	if (has_ongoing_game(plid)) {
+		return net::action_status::ONGOING_GAME;
 	}
+
+	std::string key;
+	for (int i = 0; i < 4; i++) {
+		if(!key.empty())
+			key += ' ';
+		key += valid_colors[rand() % valid_colors.size()];
+	}
+	std::cout << plid << "\t" << playtime << "\t" << key <<"\n";
+	
+	ongoing_games.emplace(plid, Game(plid, playtime, key));
+
+	return net::action_status::OK;
 }
