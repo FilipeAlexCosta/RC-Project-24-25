@@ -6,8 +6,8 @@ all: app_client app_server
 app_client: client/client.cpp common/common.cpp
 	$(CC) $(FLAGS) client/client.cpp common/common.cpp -o app_client
 
-app_server: server/server.cpp common/common.cpp
-	$(CC) $(FLAGS) server/server.cpp common/common.cpp -o app_server 
+app_server: server/server.cpp server/game.cpp common/common.cpp
+	$(CC) $(FLAGS) server/server.cpp server/game.cpp common/common.cpp -o app_server 
 
 clean:
 	rm app_client app_server 

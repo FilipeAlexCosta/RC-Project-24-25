@@ -82,9 +82,10 @@ udp_connection::udp_connection(self_address&& self, size_t timeout) : _self{std:
 	if ((_fd = socket(_self.family(), _self.socket_type(), 0)) == -1)
 		return;
 	if (_self.is_passive()) {
-		if (bind(_fd, _self.unwrap()->ai_addr, _self.unwrap()->ai_addrlen) == -1)
+		if (bind(_fd, _self.unwrap()->ai_addr, _self.unwrap()->ai_addrlen) == -1) {
 			close(_fd);
-		_fd = -1;
+			_fd = -1;
+		}
 		return;
 	}
 	timeval t;
@@ -143,7 +144,7 @@ std::pair<action_status, stream<udp_source>> udp_connection::request(const out_s
 	return {action_status::CONN_TIMEOUT, {std::string_view{}}};
 }
 
-action_status udp_connection::send(const out_stream& msg, const other_address& other) {
+action_status udp_connection::answer(const out_stream& msg, const other_address& other) const {
 	auto to_send = msg.view();
 	int n = sendto(_fd, to_send.data(), to_send.size(), 0, (struct sockaddr*) &other.addr, other.addrlen);
 	if (n == -1)
@@ -517,9 +518,8 @@ void net::fill_max_playtime(char res[MAX_PLAYTIME_SIZE], const field& max_playti
 action_status net::is_valid_color(const field& field) {
 	if (field.length() != 1)
         return action_status::BAD_ARG;
-    
-    if (valid_colors.find(field[0]) != valid_colors.end())
-        return action_status::OK;
-
+	for (auto col : VALID_COLORS)
+		if (field[0] == col)
+			return action_status::OK;
     return action_status::BAD_ARG;
 }

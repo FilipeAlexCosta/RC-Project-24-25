@@ -10,7 +10,6 @@
 #include <netdb.h>
 
 #include <unordered_map>
-#include <unordered_set>
 #include <functional>
 #include <string>
 #include <cstring>
@@ -27,9 +26,9 @@
 #define DEFAULT_TIMEOUT 5
 #define DEFAULT_LISTEN_CONNS 5
 
-const std::unordered_set<char> valid_colors = {'R', 'G', 'B', 'Y', 'O', 'P'};
-
 namespace net {
+static const std::string VALID_COLORS = "RGBYOP";
+
 enum class action_status {
 	OK,
 	ERR,
@@ -261,7 +260,7 @@ struct udp_connection {
 	~udp_connection();
 	bool valid() const;
 	std::pair<action_status, stream<udp_source>> request(const out_stream& msg, other_address& other);
-	action_status send(const out_stream& msg, const other_address& other);
+	action_status answer(const out_stream& msg, const other_address& other) const;
 	std::pair<action_status, stream<udp_source>> listen(other_address& other);
 private:
 	self_address _self;
@@ -280,6 +279,7 @@ struct tcp_connection {
 	~tcp_connection();
 	bool valid() const;
 	std::pair<action_status, stream<tcp_source>> request(const out_stream& msg);
+	action_status answer(const out_stream& msg);
 protected:
 	int _fd{-1};
 };
@@ -315,7 +315,7 @@ struct action_map {
 	action_status execute(arg_stream& strm, ARGS... args) const {
 		auto [status, comm] = strm.read(1, SIZE_MAX);
 		if (status != action_status::OK)
-			return status;
+			return action_status::UNK_ACTION;
 		auto it = _actions.find(comm);
 		if (it == _actions.end())
 			return action_status::UNK_ACTION;
