@@ -3,8 +3,8 @@
 #include <cstring>
 #include <fstream>
 
-#define DEFAULT_PORT "58016"
 #define DEFAULT_HOST "localhost"
+#define DEFAULT_PORT "58016"
 #define TIMEOUT 5
 
 static bool in_game = false;
@@ -12,13 +12,13 @@ static bool exit_app = false;
 static char current_plid[PLID_SIZE];
 static char current_trial = '0';
 
-static net::action_status do_start(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
-static net::action_status do_try(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
-static net::action_status do_show_trials(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
-static net::action_status do_scoreboard(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
-static net::action_status do_quit(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
-static net::action_status do_exit(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
-static net::action_status do_debug(net::stream<net::file_source>& msg, std::string_view host, std::string_view port);
+static net::action_status do_start(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr);
+static net::action_status do_try(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr);
+static net::action_status do_quit(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr);
+static net::action_status do_exit(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr);
+static net::action_status do_debug(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr);
+static net::action_status do_show_trials(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr);
+static net::action_status do_scoreboard(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr);
 
 int main(int argc, char** argv) {
 	int argi = 1;
@@ -52,7 +52,14 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	net::action_map<net::file_source, std::string_view, std::string_view> actions;
+	net::udp_connection udp{net::self_address{host, port, SOCK_DGRAM}};
+	if (!udp.valid()) {
+		std::cout << "Failed to open udp connection. Check if the address and port are correct." << std::endl;
+		return 1;
+	}
+	net::self_address tcp_addr{net::self_address{host, port, SOCK_STREAM}};
+
+	net::action_map<net::file_source, net::udp_connection&, const net::self_address&> actions;
 	actions.add_action("start", do_start);
 	actions.add_action("try", do_try);
 	actions.add_action({"show_trials", "st"}, do_show_trials);
@@ -63,7 +70,7 @@ int main(int argc, char** argv) {
 
 	while (!exit_app) {
 		net::stream<net::file_source> strm{STDIN_FILENO, false};
-		auto status = actions.execute(strm, host, port);
+		auto status = actions.execute(strm, udp, tcp_addr);
 		if (status != net::action_status::OK)
 			std::cerr << net::status_to_message(status) << ".\n";
 		status = strm.exhaust();
@@ -82,7 +89,7 @@ static void setup_game_clientside(const net::field& plid) {
 		current_plid[i] = plid[i];
 }
 
-static net::action_status do_start(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
+static net::action_status do_start(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto [status, fields] = msg.read({{6, 6}, {1, 3}});
 	if (status != net::action_status::OK || (status = msg.no_more_fields()) != net::action_status::OK)
 		return status;
@@ -103,18 +110,11 @@ static net::action_status do_start(net::stream<net::file_source>& msg, std::stri
 
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
-	if (!udp_info.is_valid())
-		return net::action_status::CONN_ERR;
-	char ans_buf[UDP_MSG_SIZE];
-	int ans_bytes = -1;
-	status = net::udp_request(out_strm, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
-	if (status != net::action_status::OK)
-		return status;
+	net::other_address other;
+	auto [req_stat, ans_strm] = udp.request(out_strm, other);
+	if (req_stat != net::action_status::OK)
+		return req_stat;
 
-	std::cout << "Received buffer: \"" << std::string_view{ans_buf, static_cast<size_t>(ans_bytes)} << '\"' << std::endl;
-
-	net::stream<net::udp_source> ans_strm{std::string_view{ans_buf, static_cast<size_t>(ans_bytes)}};
 	auto res = ans_strm.read(3, 3);
 	if (res.first != net::action_status::OK)
 		return res.first;
@@ -143,7 +143,7 @@ static net::action_status do_start(net::stream<net::file_source>& msg, std::stri
 	return net::action_status::UNK_STATUS;
 }
 
-static net::action_status do_try(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
+static net::action_status do_try(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	net::out_stream out_strm;
 	out_strm.write("TRY");
 	out_strm.write(current_plid);
@@ -165,18 +165,11 @@ static net::action_status do_try(net::stream<net::file_source>& msg, std::string
 
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
-	if (!udp_info.is_valid())
-		return net::action_status::CONN_ERR;
-	char ans_buf[UDP_MSG_SIZE];
-	int ans_bytes = -1;
-	res.first = net::udp_request(out_strm, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
-	if (res.first != net::action_status::OK)
-		return res.first;
+	net::other_address other;
+	auto [ans_stat, ans_strm] = udp.request(out_strm, other);
+	if (ans_stat != net::action_status::OK)
+		return ans_stat;
 	
-	std::cout << "Received buffer: \"" << std::string_view{ans_buf, static_cast<size_t>(ans_bytes)} << "\"" << std::endl;
-
-	net::stream<net::udp_source> ans_strm{std::string_view{ans_buf, static_cast<size_t>(ans_bytes)}};
 	res = ans_strm.read(3, 3);
 	if (res.first != net::action_status::OK)
 		return res.first;
@@ -255,18 +248,14 @@ static net::action_status do_try(net::stream<net::file_source>& msg, std::string
 	return net::action_status::OK;
 }
 
-static net::action_status end_game(net::socket_context& udp_info) {
+static net::action_status end_game(net::udp_connection& udp) {
 	net::out_stream out_strm;
 	out_strm.write("QUT").write(current_plid).prime();
 
-	char ans_buf[UDP_MSG_SIZE];
-	int ans_bytes = -1;
-	auto status = net::udp_request(out_strm, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
-	if (status != net::action_status::OK)
-		return status;
-
-	std::cout << "Received buffer: \"" << std::string_view{ans_buf, static_cast<size_t>(ans_bytes)} << '\"' << std::endl;
-	net::stream<net::udp_source> ans_strm{std::string_view{ans_buf, static_cast<size_t>(ans_bytes)}};
+	net::other_address other;
+	auto [ans_stat , ans_strm] = udp.request(out_strm, other);
+	if (ans_stat != net::action_status::OK)
+		return ans_stat;
 
 	auto res = ans_strm.read(3, 3);
 	if (res.first != net::action_status::OK)
@@ -313,21 +302,17 @@ static net::action_status end_game(net::socket_context& udp_info) {
 }
 
 
-static net::action_status do_quit(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
+static net::action_status do_quit(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto res = msg.no_more_fields();
 	if (res != net::action_status::OK)
 		return res;
 
 	if (!in_game)
 		return net::action_status::NOT_IN_GAME;
-
-	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
-	if (!udp_info.is_valid())
-		return net::action_status::CONN_ERR;
-	return end_game(udp_info);
+	return end_game(udp);
 }
 
-static net::action_status do_exit(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
+static net::action_status do_exit(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto res = msg.no_more_fields();
 	if (res != net::action_status::OK)
 		return res;
@@ -337,15 +322,12 @@ static net::action_status do_exit(net::stream<net::file_source>& msg, std::strin
 		return net::action_status::OK;
 	}
 
-	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
-	if (!udp_info.is_valid())
-		return net::action_status::CONN_ERR;
-	exit_app = ((res = end_game(udp_info)) == net::action_status::OK);
+	exit_app = ((res = end_game(udp)) == net::action_status::OK);
 	// TODO: should probably quit even in case of error?
 	return res;
 }
 
-static net::action_status do_debug(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
+static net::action_status do_debug(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto res = msg.read({{PLID_SIZE, PLID_SIZE}, {1, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
 	if (res.first != net::action_status::OK || (res.first = msg.no_more_fields()) != net::action_status::OK)
 		return res.first;
@@ -369,17 +351,10 @@ static net::action_status do_debug(net::stream<net::file_source>& msg, std::stri
 
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context udp_info{host, port, SOCK_DGRAM, DEFAULT_TIMEOUT};
-	if (!udp_info.is_valid())
-		return net::action_status::CONN_ERR;
-	char ans_buf[UDP_MSG_SIZE];
-	int ans_bytes = -1;
-	res.first = net::udp_request(out_strm, udp_info, ans_buf, UDP_MSG_SIZE, ans_bytes);
-	if (res.first != net::action_status::OK)
-		return res.first;
-
-	std::cout << "Received buffer: \"" << std::string_view{ans_buf, static_cast<size_t>(ans_bytes)} << '\"' << std::endl;
-	net::stream<net::udp_source> ans_strm{std::string_view{ans_buf, static_cast<size_t>(ans_bytes)}};
+	net::other_address other;
+	auto [ans_stat, ans_strm] = udp.request(out_strm, other);
+	if (ans_stat != net::action_status::OK)
+		return ans_stat;
 
 	auto ans_res = ans_strm.read(3, 3);
 	if (ans_res.first != net::action_status::OK)
@@ -444,7 +419,7 @@ static net::action_status write_file(const std::string& filename, const std::str
 	return net::action_status::OK;
 }
 
-static net::action_status do_show_trials(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
+static net::action_status do_show_trials(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto res = msg.no_more_fields();
 	if (res != net::action_status::OK)
 		return res;
@@ -455,10 +430,10 @@ static net::action_status do_show_trials(net::stream<net::file_source>& msg, std
 	out_strm.write("STR").write(current_plid).prime();
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context tcp_info{host, port, SOCK_STREAM, 0};
-	if (!tcp_info.is_valid())
+	net::tcp_connection tcp{tcp_addr};
+	if (!tcp.valid())
 		return net::action_status::CONN_ERR;
-	auto [ans_ok, ans_strm] = net::tcp_request(out_strm, tcp_info);
+	auto [ans_ok, ans_strm] = tcp.request(out_strm);
 	if (ans_ok != net::action_status::OK)
 		return ans_ok;
 
@@ -491,7 +466,7 @@ static net::action_status do_show_trials(net::stream<net::file_source>& msg, std
 
 }
 
-static net::action_status do_scoreboard(net::stream<net::file_source>& msg, std::string_view host, std::string_view port) {
+static net::action_status do_scoreboard(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto res = msg.no_more_fields();
 	if (res != net::action_status::OK)
 		return res;
@@ -500,10 +475,10 @@ static net::action_status do_scoreboard(net::stream<net::file_source>& msg, std:
 	out_strm.write("SSB").prime();
 	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
-	net::socket_context tcp_info{host, port, SOCK_STREAM, 0};
-	if (!tcp_info.is_valid())
+	net::tcp_connection tcp{tcp_addr};
+	if (!tcp.valid())
 		return net::action_status::CONN_ERR;
-	auto [ans_ok, ans_strm] = net::tcp_request(out_strm, tcp_info);
+	auto [ans_ok, ans_strm] = tcp.request(out_strm);
 	if (ans_ok != net::action_status::OK)
 		return ans_ok;
 	auto fld = ans_strm.read(3, 3);

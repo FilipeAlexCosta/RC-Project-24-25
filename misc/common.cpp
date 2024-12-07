@@ -1,97 +1,242 @@
 #include "common.hpp"
 
 #include <stdexcept>
+#include <iostream>
 
 using namespace net;
 
-socket_context::socket_context(const std::string_view& rec_addr, const std::string_view& rec_port, int type, size_t timeout) {
-	socket_fd = socket(AF_INET, type, 0);
-	if (socket_fd == -1)
-		return;
+self_address::self_address(const std::string_view& other_addr, const std::string_view& other_port, int socktype, int family)
+	: _fam{family}, _sockt{socktype}, _passive{false} {
 	addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = type;
+	hints.ai_socktype = socktype;
+	hints.ai_family = family;
 
-	if (getaddrinfo(rec_addr.data(), rec_port.data(), &hints, &receiver_info) != 0) {
-		close(socket_fd);
-		socket_fd = -1;
+	if (getaddrinfo(other_addr.data(), other_port.data(), &hints, &_info) != 0) {
+		_info = nullptr;
 		return;
 	}
+}
 
-	if (type == SOCK_STREAM && connect(socket_fd, receiver_info->ai_addr, receiver_info->ai_addrlen) != 0) {
-		freeaddrinfo(receiver_info);
-		close(socket_fd);
-		socket_fd = -1;
+self_address::self_address(const std::string_view& other_port, int family, int socktype)
+	: _fam{family}, _sockt{socktype}, _passive{true} {
+	addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_socktype = socktype;
+	hints.ai_family = family;
+	hints.ai_flags = AI_PASSIVE;
+
+	if (getaddrinfo(NULL, other_port.data(), &hints, &_info) != 0) {
+		_info = nullptr;
 		return;
 	}
-	
-	if (timeout == 0)
-		return;
+}
 
+self_address::self_address(self_address&& other) :
+	_info{other._info}, _fam{other._fam}, _sockt{other._sockt}, _passive{other._passive} {
+	other._info = nullptr;
+}
+
+self_address& self_address::operator=(self_address&& other) {
+	if (this == &other)
+		return *this;
+	if (_info)
+		freeaddrinfo(_info);
+	_info = other._info;
+	_fam = other._fam;
+	_sockt = other._sockt;
+	_passive = other._passive;
+	other._info = nullptr;
+	return *this;
+}
+
+self_address::~self_address() {
+	if (!_info)
+		return;
+	freeaddrinfo(_info);
+}
+
+bool self_address::valid() const {
+	return _info;
+}
+
+const addrinfo* self_address::unwrap() const {
+	return _info;
+}
+
+int self_address::family() const {
+	return _fam;
+}
+
+int self_address::socket_type() const {
+	return _sockt;
+}
+
+bool self_address::is_passive() const {
+	return _passive;
+}
+
+udp_connection::udp_connection(self_address&& self, size_t timeout) : _self{std::move(self)} {
+	if (!_self.valid() || _self.socket_type() != SOCK_DGRAM)
+		return;
+	if ((_fd = socket(_self.family(), _self.socket_type(), 0)) == -1)
+		return;
+	if (_self.is_passive()) {
+		if (bind(_fd, _self.unwrap()->ai_addr, _self.unwrap()->ai_addrlen) == -1)
+			close(_fd);
+		_fd = -1;
+		return;
+	}
 	timeval t;
 	t.tv_sec = timeout; // s second timeout
 	t.tv_usec = 0;
-	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1) {
-		freeaddrinfo(receiver_info);
-		close(socket_fd);
-		socket_fd = -1;
+	if (setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1) {
+		close(_fd);
+		_fd = -1;
 		return;
 	}
 }
 
-socket_context::socket_context(const std::string_view& rec_port, int type, size_t timeout) {
-	socket_fd = socket(AF_INET, type, 0);
-	if (socket_fd == -1)
-		return;
-	addrinfo hints;
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = type;
-	hints.ai_flags = SOCK_DGRAM;
+udp_connection::udp_connection(udp_connection&& other)
+	: _self{std::move(other._self)}, _fd{other._fd} {
+	std::copy(other._buf, other._buf + UDP_MSG_SIZE, _buf);
+	other._fd = -1;
+}
 
-	if (getaddrinfo(NULL, rec_port.data(), &hints, &receiver_info) != 0) {
-		close(socket_fd);
-		socket_fd = -1;
-		return;
+udp_connection& udp_connection::operator=(udp_connection&& other) {
+	if (this == &other)
+		return *this;
+	if (_fd != -1)
+		close(_fd);
+	_self = std::move(other._self);
+	_fd = other._fd;
+	std::copy(other._buf, other._buf + UDP_MSG_SIZE, _buf);
+	other._fd = -1;
+	return *this;
+}
+
+udp_connection::~udp_connection() {
+	if (_fd != -1)
+		close(_fd);
+}
+
+bool udp_connection::valid() const {
+	return _fd != -1;
+}
+
+std::pair<action_status, stream<udp_source>> udp_connection::request(const out_stream& msg, other_address& other) {
+	auto to_send = msg.view();
+	other.addrlen = sizeof(other.addr);
+	for (int retries = 0; retries < MAX_RESEND; retries++) {
+		int n = sendto(_fd, to_send.data(), to_send.size(), 0, _self.unwrap()->ai_addr, _self.unwrap()->ai_addrlen);
+		if (n == -1)
+			return {action_status::SEND_ERR, {std::string_view{}}};
+		n = recvfrom(_fd, _buf, UDP_MSG_SIZE, 0, (struct sockaddr*) &other.addr, &other.addrlen);
+		if (n >= 0) {
+			std::cerr << "UDP Response: \"" << std::string_view{_buf, static_cast<size_t>(n)} << "\"" <<std::endl;
+			return {action_status::OK, {std::string_view{_buf, static_cast<size_t>(n)}}};
+		}
+		n = -1;
+		if (errno != EWOULDBLOCK && errno != EAGAIN)
+			return {action_status::RECV_ERR, {std::string_view{}}};
 	}
+	return {action_status::CONN_TIMEOUT, {std::string_view{}}};
+}
 
-	if (bind(socket_fd, receiver_info->ai_addr, receiver_info->ai_addrlen) != 0) {
-		close(socket_fd);
-		socket_fd = -1;
-		return;
-	}
+action_status udp_connection::send(const out_stream& msg, const other_address& other) {
+	auto to_send = msg.view();
+	int n = sendto(_fd, to_send.data(), to_send.size(), 0, (struct sockaddr*) &other.addr, other.addrlen);
+	if (n == -1)
+		return action_status::SEND_ERR;
+	return action_status::OK;
+}
 
-	if (type == SOCK_STREAM && listen(socket_fd, DEFAULT_LISTEN_CONNS) != 0) {
-		freeaddrinfo(receiver_info);
-		close(socket_fd);
-		socket_fd = -1;
-		return;
-	}
-	
-	if (timeout == 0)
-		return;
+std::pair<action_status, stream<udp_source>> udp_connection::listen(other_address& other) {
+	other.addrlen = sizeof(other.addr);
+	int n = recvfrom(_fd, _buf, UDP_MSG_SIZE, 0, (struct sockaddr*) &other.addr, &other.addrlen);
+	if (n == -1)
+		return {action_status::RECV_ERR, {std::string_view{}}};
+	return {action_status::OK, {std::string_view{_buf, static_cast<size_t>(n)}}};
+}
 
-	timeval t;
-	t.tv_sec = timeout; // s second timeout
-	t.tv_usec = 0;
-	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1) {
-		freeaddrinfo(receiver_info);
-		close(socket_fd);
-		socket_fd = -1;
+tcp_connection::tcp_connection() : _fd{-1} {}
+
+tcp_connection::tcp_connection(int fd) : _fd{fd} {
+	if (fd < 0)
+		_fd = -1;
+}
+
+tcp_connection::tcp_connection(const self_address& self) {
+	if (!self.valid() || self.socket_type() != SOCK_STREAM)
+		return;
+	if ((_fd = socket(self.family(), self.socket_type(), 0)) == -1)
+		return;
+	if (!self.is_passive() && connect(_fd, self.unwrap()->ai_addr, self.unwrap()->ai_addrlen) == -1) {
+		close(_fd);
+		_fd = -1;
 		return;
 	}
 }
 
-socket_context::~socket_context() {
-	if (socket_fd == -1)
-		return;
-	freeaddrinfo(receiver_info);
-	close(socket_fd);
+tcp_connection::tcp_connection(tcp_connection&& other) : _fd{other._fd} {
+	other._fd = -1;
 }
 
-bool socket_context::is_valid() {
-	return socket_fd != -1;
+tcp_connection& tcp_connection::operator=(tcp_connection&& other) {
+	if (this == &other)
+		return *this;
+	if (_fd != -1)
+		close(_fd);
+	_fd = other._fd;
+	other._fd = -1;
+	return *this;
+}
+
+tcp_connection::~tcp_connection() {
+	if (_fd != -1)
+		close(_fd);
+}
+
+bool tcp_connection::valid() const {
+	return _fd != -1;
+}
+
+std::pair<action_status, stream<tcp_source>> tcp_connection::request(const out_stream& msg) {
+	int done = 0;
+	auto view = msg.view();
+	while (done < view.size()) {
+		int n = write(_fd, view.data() + done, view.size() - done);
+		if (n <= 0)
+			return {action_status::SEND_ERR, {-1}};
+		done += n;
+	}
+	return {net::action_status::OK, {_fd}};
+}
+
+tcp_server::tcp_server(const self_address& self, size_t sub_conns) : tcp_connection{self} {
+	if (!self.is_passive())
+		return;
+	if (bind(_fd, self.unwrap()->ai_addr, self.unwrap()->ai_addrlen) == -1
+		|| listen(_fd, sub_conns) == -1) {
+		close(_fd);
+		_fd = -1;
+		return;
+	}
+}
+
+std::pair<action_status, tcp_connection> tcp_server::accept_client(const out_stream& msg, other_address& other) {
+	int new_fd = -1;
+	other.addrlen = sizeof(other.addr);
+	if ((new_fd = accept(_fd, (sockaddr*) &other.addr, &other.addrlen)) == -1)
+		return {net::action_status::CONN_ERR, tcp_connection{}};
+	tcp_connection new_conn{new_fd};
+	if (!new_conn.valid())
+		return {net::action_status::CONN_ERR, tcp_connection{}};
+	return {net::action_status::OK, std::move(new_conn)};
+}
+
+bool tcp_server::valid() const {
+	return tcp_connection::valid();
 }
 
 bool source::found_eom() const {
@@ -146,6 +291,7 @@ bool tcp_source::is_skippable(char c) const {
 }
 
 string_source::string_source(const std::string_view& source) : _source(source) {}
+
 string_source::string_source(std::string_view&& source) : _source(std::move(source)) {}
 
 action_status string_source::read_len(std::string& buf, size_t len, size_t& n, bool check_eom) {
@@ -202,8 +348,6 @@ out_stream& out_stream::write(char c) {
 	_buf.push_back(DEFAULT_SEP);
 	return *this;
 }
-
-
 
 out_stream& out_stream::write_and_fill(const field& f, size_t n, char fill) {
 	if (_primed)
@@ -337,33 +481,6 @@ std::string net::status_to_message(action_status status) {
 			res = "Unknown error";
 	}
 	return res;
-}
-
-action_status net::udp_request(const out_stream& out_str, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read) {
-	auto msg = out_str.view();
-	for (int retries = 0; retries < MAX_RESEND; retries++) {
-		read = sendto(udp_info.socket_fd, msg.data(), msg.size(), 0, udp_info.receiver_info->ai_addr, udp_info.receiver_info->ai_addrlen);
-		if (read == -1)
-			return net::action_status::SEND_ERR;
-		read = recvfrom(udp_info.socket_fd, ans, ans_sz, 0, (struct sockaddr*) &udp_info.sender_addr, &udp_info.sender_addr_len);
-		if (read >= 0)
-			return net::action_status::OK;
-		if (errno != EWOULDBLOCK && errno != EAGAIN)
-			return net::action_status::RECV_ERR;
-	}
-	return net::action_status::CONN_TIMEOUT;
-}
-
-std::pair<action_status, stream<tcp_source>> net::tcp_request(const out_stream& out_str, net::socket_context& tcp_info) {
-	int done = 0;
-	auto view = out_str.view();
-	while (done < view.size()) {
-		int n = write(tcp_info.socket_fd, view.data() + done, view.size() - done);
-		if (n <= 0)
-			return {action_status::SEND_ERR, {-1}};
-		done += n;
-	}
-	return {net::action_status::OK, {tcp_info.socket_fd}};
 }
 
 action_status net::is_valid_plid(const field& field) {

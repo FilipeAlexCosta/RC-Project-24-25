@@ -30,19 +30,6 @@
 const std::unordered_set<char> valid_colors = {'R', 'G', 'B', 'Y', 'O', 'P'};
 
 namespace net {
-struct socket_context {
-	int socket_fd = -1;
-	addrinfo* receiver_info = nullptr;
-	sockaddr_in sender_addr;
-	socklen_t sender_addr_len = sizeof(sender_addr);
-
-	socket_context(const std::string_view& rec_addr, const std::string_view& rec_port, int type, size_t timeout);
-	socket_context(const std::string_view& rec_port, int type, size_t timeout);
-	~socket_context();
-
-	bool is_valid();
-};
-
 enum class action_status {
 	OK,
 	ERR,
@@ -72,6 +59,32 @@ enum class action_status {
 	TRY_ENT,
 	TRY_ETM,
 	PERSIST_ERR
+};
+
+std::string status_to_message(action_status status);
+
+struct self_address {
+	self_address(const std::string_view& other_addr, const std::string_view& other_port, int socktype, int family = AF_INET);
+	self_address(const std::string_view& other_port, int socktype, int family = AF_INET);
+	self_address(const self_address& other) = delete;
+	self_address& operator=(const self_address& other) = delete;
+	self_address(self_address&& other);
+	self_address& operator=(self_address&& other);
+	~self_address();
+	bool valid() const;
+	const addrinfo* unwrap() const;
+	int family() const;
+	int socket_type() const;
+	bool is_passive() const;
+private:
+	addrinfo* _info{nullptr};
+	int _fam{-1}, _sockt{-1};
+	bool _passive;
+};
+
+struct other_address {
+	socklen_t addrlen;
+	sockaddr_in addr;
 };
 
 struct source {
@@ -239,11 +252,43 @@ private:
 	bool _primed = false;
 };
 
-std::string status_to_message(action_status status);
+struct udp_connection {
+	udp_connection(self_address&& self, size_t timeout = DEFAULT_TIMEOUT);
+	udp_connection(const udp_connection& other) = delete;
+	udp_connection(udp_connection&& other);
+	udp_connection& operator=(const udp_connection& other) = delete;
+	udp_connection& operator=(udp_connection&& other);
+	~udp_connection();
+	bool valid() const;
+	std::pair<action_status, stream<udp_source>> request(const out_stream& msg, other_address& other);
+	action_status send(const out_stream& msg, const other_address& other);
+	std::pair<action_status, stream<udp_source>> listen(other_address& other);
+private:
+	self_address _self;
+	int _fd{-1};
+	char _buf[UDP_MSG_SIZE];
+};
 
-action_status udp_request(const out_stream& out_str, net::socket_context& udp_info, char* ans, uint32_t ans_sz, int& read);
+struct tcp_connection {
+	tcp_connection();
+	tcp_connection(int fd);
+	tcp_connection(const self_address& self);
+	tcp_connection(const tcp_connection& other) = delete;
+	tcp_connection(tcp_connection&& other);
+	tcp_connection& operator=(const tcp_connection& other) = delete;
+	tcp_connection& operator=(tcp_connection&& other);
+	~tcp_connection();
+	bool valid() const;
+	std::pair<action_status, stream<tcp_source>> request(const out_stream& msg);
+protected:
+	int _fd{-1};
+};
 
-std::pair<action_status, stream<tcp_source>> tcp_request(const out_stream& out_str, net::socket_context& tcp_info);
+struct tcp_server : protected tcp_connection {
+	tcp_server(const self_address& self, size_t sub_conns = DEFAULT_LISTEN_CONNS);
+	std::pair<action_status, tcp_connection> accept_client(const out_stream& msg, other_address& other);
+	bool valid() const;
+};
 
 action_status is_valid_plid(const field& field);
 
