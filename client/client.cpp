@@ -454,8 +454,11 @@ static net::action_status do_show_trials(net::stream<net::file_source>& msg, net
 		std::cout << "The specified user has no recorded games (or a problem may have occured)" << std::endl;
 		return net::action_status::OK;
 	}
-	if (fld.second != "FIN" && fld.second != "ACT")
+	bool is_FIN = fld.second == "FIN";
+	if (!is_FIN && fld.second != "ACT")
 		return net::action_status::UNK_STATUS;
+	if (is_FIN)
+		in_game = false;
 	net::field fname, file;
 	fld.first = read_file(ans_strm, fname, file);
 	if (fld.first != net::action_status::OK || (fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
