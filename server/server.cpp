@@ -170,9 +170,15 @@ static net::action_status end_game(net::stream<net::udp_source>& req,
 	}
 
 	auto gm = games.find(plid);
-	if (gm == std::end(games) || gm->second.has_ended() == game::result::ONGOING) {
+	if (gm == std::end(games)) {
 		out_strm.write("NOK").prime();
 		std::cout << out_strm.view();
+		return udp_conn.answer(out_strm, client_addr);
+	}
+	if (gm->second.has_ended() != game::result::ONGOING) {
+		out_strm.write("NOK").prime();
+		std::cout << out_strm.view();
+		games.erase(gm);
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
@@ -281,7 +287,6 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	char duplicate_at = gm->second.is_duplicate(play);
 	if (trial != gm->second.current_trial() + 1) {
 		if (trial == gm->second.current_trial() && duplicate_at == gm->second.current_trial()) {
-			std::cout << "here\n";
 			out_strm.write("OK");
 			out_strm.write(gm->second.current_trial());
 			out_strm.write(gm->second.last_trial()->nB + '0');
@@ -292,7 +297,7 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 
 		out_strm.write("INV").prime();
 		std::cout << out_strm.view();
-		// games.erase(gm); // TODO: persist game?
+		games.erase(gm); // TODO: persist game?
 		return udp_conn.answer(out_strm, client_addr);
 	}
 

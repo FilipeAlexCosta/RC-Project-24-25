@@ -23,7 +23,6 @@ struct game {
 	game(uint16_t duration);
 	game(uint16_t duration, const char secret_key[GUESS_SIZE]);
 	result guess(char play[GUESS_SIZE]);
-	std::pair<uint8_t, uint8_t> compare(const char guess[GUESS_SIZE]);
 	void undo_guess();
 	result has_ended() const;
 	const char* secret_key() const;
@@ -31,6 +30,7 @@ struct game {
 	const trial_record* last_trial() const;
 	char is_duplicate(const char guess[GUESS_SIZE]) const;
 private:
+	std::pair<uint8_t, uint8_t> compare(const char guess[GUESS_SIZE]);
 	uint16_t _duration; // in seconds
 	std::time_t _start{std::time(nullptr)};
 	bool _won{false};

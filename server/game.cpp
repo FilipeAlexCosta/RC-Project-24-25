@@ -13,23 +13,50 @@ game::result game::guess(char play[GUESS_SIZE]) {
 	if (_won)
 		return result::WON;
 	if (_curr_trial >= MAX_TRIALS)
-		return result::LOST_TRIES;
+		return result::LOST_TRIES; // ensures calls after finishing are correct
 	if (_start + _duration < std::time(nullptr))
 		return result::LOST_TIME;
 	for (int j = 0; j < GUESS_SIZE; j++)
 		_trials[_curr_trial - '0'].trial[j] = play[j];
-	_curr_trial++;
 	auto [nB, nW] = compare(play);
+	_trials[_curr_trial - '0'].nB = nB;
+	_trials[_curr_trial - '0'].nW = nW;
+	_curr_trial++;
 	if (nB == GUESS_SIZE) {
 		_won = true;
 		return result::WON;
 	}
+	if (_curr_trial >= MAX_TRIALS) // actual check
+		return result::LOST_TRIES;
 	return result::ONGOING;
 }
 
 std::pair<uint8_t, uint8_t> game::compare(const char guess[GUESS_SIZE]) {
 	uint8_t nB = 0, nW = 0;
-	for (int guess_it  = 0; guess_it < GUESS_SIZE; guess_it++) {
+	for (int real_it = 0; real_it < GUESS_SIZE; real_it++) {
+		if (_secret_key[real_it] == guess[real_it]) {
+			nB++;
+			continue;
+		}
+		bool done = false;
+		for (int guess_it = 0; guess_it < real_it; guess_it++) {
+			if (_secret_key[real_it] == guess[guess_it]) {
+				done = true;
+				break;
+			}
+		}
+		if (done) {
+			nW++;
+			continue;
+		}
+		for (int guess_it = real_it + 1; guess_it < GUESS_SIZE; guess_it++) {
+			if (_secret_key[real_it] == guess[guess_it]) {
+				nW++;
+				break;
+			}
+		}
+	}
+	/*for (int guess_it  = 0; guess_it < GUESS_SIZE; guess_it++) {
 		if (guess[guess_it] == _secret_key[guess_it]) {
 			nB++;
 			continue;
@@ -51,7 +78,7 @@ std::pair<uint8_t, uint8_t> game::compare(const char guess[GUESS_SIZE]) {
 				break;
 			}
 		}
-	}
+	}*/
 	return {nB, nW};
 }
 
