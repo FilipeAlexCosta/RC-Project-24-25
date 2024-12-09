@@ -66,7 +66,7 @@ game::result game::has_ended() const {
 		return result::WON;
 	if (_curr_trial >= MAX_TRIALS)
 		return result::LOST_TRIES;
-	if (_start + _duration >= std::time(nullptr))
+	if (_start + _duration < std::time(nullptr))
 		return result::LOST_TIME;
 	return result::ONGOING;
 }

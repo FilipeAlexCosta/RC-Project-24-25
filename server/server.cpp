@@ -123,31 +123,30 @@ static net::action_status start_new_game(net::stream<net::udp_source>& req,
 	if (status != net::action_status::OK || (status = req.no_more_fields()) != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		std::cout << out_strm.view();
-		udp_conn.answer(out_strm, client_addr);
-		return net::action_status::OK;
+		return udp_conn.answer(out_strm, client_addr);
 	}
 	status = net::is_valid_plid(fields[0]);
 	if (status != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		std::cout << out_strm.view();
-		udp_conn.answer(out_strm, client_addr);
-		return net::action_status::OK;
+		return udp_conn.answer(out_strm, client_addr);
 	}
 	
 	status = net::is_valid_max_playtime(fields[1]);
 	if (status != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		std::cout << out_strm.view();
-		udp_conn.answer(out_strm, client_addr);
-		return net::action_status::OK;
+		return udp_conn.answer(out_strm, client_addr);
 	}
 
 	auto gm = games.find(fields[0]);
 	if (gm != std::end(games)) {
-		out_strm.write("NOK").prime();
-		std::cout << out_strm.view();
-		udp_conn.answer(out_strm, client_addr);
-		return net::action_status::OK;
+		if (gm->second.has_ended() == game::result::ONGOING) {
+			out_strm.write("NOK").prime();
+			std::cout << out_strm.view();
+			return udp_conn.answer(out_strm, client_addr);	
+		}
+		games.erase(gm);
 	}
 	games.emplace(std::move(fields[0]), game{static_cast<uint16_t>(std::stoul(fields[1]))});
 	out_strm.write("OK").prime();
@@ -171,7 +170,7 @@ static net::action_status end_game(net::stream<net::udp_source>& req,
 	}
 
 	auto gm = games.find(plid);
-	if (gm == std::end(games)) {
+	if (gm == std::end(games) || gm->second.has_ended() == game::result::ONGOING) {
 		out_strm.write("NOK").prime();
 		std::cout << out_strm.view();
 		return udp_conn.answer(out_strm, client_addr);
@@ -221,10 +220,14 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 
 	auto gm = games.find(fields[0]);
 	if (gm != std::end(games)) {
-		out_strm.write("NOK").prime();
-		std::cout << out_strm.view();
-		return udp_conn.answer(out_strm, client_addr);
+		if (gm->second.has_ended() == game::result::ONGOING) {
+			out_strm.write("NOK").prime();
+			std::cout << out_strm.view();
+			return udp_conn.answer(out_strm, client_addr);	
+		}
+		games.erase(gm);
 	}
+
 	games.emplace(std::move(fields[0]), game{static_cast<uint16_t>(std::stoul(fields[1])), secret_key});
 	out_strm.write("OK").prime();
 	std::cout << out_strm.view();
@@ -276,28 +279,29 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		return udp_conn.answer(out_strm, client_addr);
 	}
 	char duplicate_at = gm->second.is_duplicate(play);
-	if (trial != gm->second.current_trial() + 1 || (trial == gm->second.current_trial() && duplicate_at != gm->second.current_trial())) {
+	if (trial != gm->second.current_trial() + 1) {
+		if (trial == gm->second.current_trial() && duplicate_at == gm->second.current_trial()) {
+			std::cout << "here\n";
+			out_strm.write("OK");
+			out_strm.write(gm->second.current_trial());
+			out_strm.write(gm->second.last_trial()->nB + '0');
+			out_strm.write(gm->second.last_trial()->nW + '0').prime();
+			std::cout << out_strm.view();
+			return udp_conn.answer(out_strm, client_addr);
+		}
+
 		out_strm.write("INV").prime();
 		std::cout << out_strm.view();
-		games.erase(gm); // TODO: persist game?
+		// games.erase(gm); // TODO: persist game?
 		return udp_conn.answer(out_strm, client_addr);
 	}
-	if (duplicate_at != MAX_TRIALS + 1 && duplicate_at != gm->second.current_trial()) {
-		out_strm.write("DUP");
-		std::cout << out_strm.view();
-		return udp_conn.answer(out_strm, client_addr);
-	}
+
 	if (duplicate_at != MAX_TRIALS + 1) {
-		out_strm.write("OK");
-		out_strm.write(gm->second.current_trial());
-		out_strm.write(gm->second.last_trial()->nB + '0');
-		out_strm.write(gm->second.last_trial()->nW + '0');
-		for (int i = 0; i < GUESS_SIZE; i++)
-			out_strm.write(gm->second.last_trial()->trial[i]);
-		out_strm.prime();
+		out_strm.write("DUP").prime();
 		std::cout << out_strm.view();
 		return udp_conn.answer(out_strm, client_addr);
 	}
+
 	game::result game_res = gm->second.guess(play);
 	if (game_res == game::result::LOST_TIME || game_res == game::result::LOST_TRIES) {
 		if (game_res == game::result::LOST_TIME)
