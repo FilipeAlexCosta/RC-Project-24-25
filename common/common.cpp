@@ -502,7 +502,7 @@ action_status net::is_valid_max_playtime(const field& field) {
 	} catch (const std::invalid_argument& err) { // cannot be read
 		return net::action_status::BAD_ARG;
 	} // out_of_range exception shouldn't be an issue
-	if (max_playtime < 0 || max_playtime > 600)
+	if (max_playtime < 0 || max_playtime > MAX_PLAYTIME)
 		return net::action_status::BAD_ARG;
 	return net::action_status::OK;
 }

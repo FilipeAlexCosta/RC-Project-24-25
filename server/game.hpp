@@ -7,6 +7,10 @@
 #include <fstream>
 
 #define DEFAULT_GAME_DIR "GAMES"
+#define SCORE_TRIAL_WEIGHT 0.5
+#define SCORE_DURATION_WEIGHT 0.5
+#define MAX_SCORE 100
+#define MIN_SCORE 0
 
 struct trial_record {
 	char trial[GUESS_SIZE];
@@ -33,6 +37,7 @@ struct game {
 	char is_duplicate(const char guess[GUESS_SIZE]) const;
 	size_t time_left() const;
 	size_t time_elapsed() const;
+	uint32_t score() const;
 	net::action_status write_header(std::ostream& out, const std::string& valid_plid) const;
 	net::action_status write_termination(std::ostream& out);
 	std::string get_final_path(const std::string& valid_plid);

@@ -126,6 +126,17 @@ size_t game::time_elapsed() const {
 	return diff;
 }
 
+uint32_t game::score() const {
+	if (_ended != result::WON)
+		return 0;
+	size_t dur = std::difftime(_end, _start);
+	float from_tri = (((MAX_TRIALS - '0') - (_curr_trial - '0')) + 1) / static_cast<float>(MAX_TRIALS);
+	float from_dur = (MAX_PLAYTIME - from_dur) / static_cast<float>(MAX_PLAYTIME);
+	float res = from_tri * SCORE_TRIAL_WEIGHT + from_dur * SCORE_DURATION_WEIGHT;
+	res /= SCORE_TRIAL_WEIGHT + SCORE_DURATION_WEIGHT;
+	return static_cast<uint32_t>(res * (MAX_SCORE - MIN_SCORE) + MIN_SCORE);
+}
+
 std::string game::get_active_path(const std::string& valid_plid) {
 	return DEFAULT_GAME_DIR + ("/STATE_" + valid_plid + ".txt");
 }

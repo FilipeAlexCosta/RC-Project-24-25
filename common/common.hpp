@@ -18,6 +18,7 @@
 #define DEFAULT_SEP ' '
 #define DEFAULT_EOM '\n'
 #define PLID_SIZE 6
+#define MAX_PLAYTIME 600
 #define MAX_PLAYTIME_SIZE 3
 #define UDP_MSG_SIZE 128
 #define MAX_RESEND 3
