@@ -310,9 +310,17 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
-	game::result game_res = gm->second.guess(play);
-	if (game_res == game::result::LOST_TIME || game_res == game::result::LOST_TRIES) {
-		if (game_res == game::result::LOST_TIME)
+	std::fstream out{game::get_active_path(plid), std::ios::in | std::ios::app};
+	auto [play_status, play_res] = gm->second.guess(plid, play);
+	if (play_status != net::action_status::OK) {
+		out_strm.write("INV").prime(); // TODO: unsure if it should return INV in this case
+		std::cout << out_strm.view();
+		games.erase(gm); // TODO: unsure if it's INV
+		udp_conn.answer(out_strm, client_addr);
+		return play_status; // return first error
+	}
+	if (play_res == game::result::LOST_TIME || play_res == game::result::LOST_TRIES) {
+		if (play_res == game::result::LOST_TIME)
 			out_strm.write("ETM");
 		else
 			out_strm.write("ENT");
