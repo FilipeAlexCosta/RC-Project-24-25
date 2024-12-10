@@ -1,4 +1,5 @@
 #include "game.hpp"
+#include "scoreboard.hpp" // TODO: change
 
 #include <iostream>
 #include <ctime>
@@ -6,6 +7,8 @@
 #define DEFAULT_PORT "58016"
 
 static bool exit_server = false;
+
+static ScoreBoard sb; // TODO: change
 
 /* signal(SIGPIPE, SIG_IGN)
  * signal(SIGCHILD, SIG_IGN) ignorar estes 2 sinais
@@ -325,5 +328,12 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	out_strm.write(gm->second.last_trial()->nB + '0');
 	out_strm.write(gm->second.last_trial()->nW + '0').prime();
 	std::cout << out_strm.view();
+
+	// Testing sb
+	// if (gm->second.has_ended() == game::result::WON) {
+	// 	sb.add_game(gm->second);
+	// 	sb.print_sb_test();
+	// }
+
 	return udp_conn.answer(out_strm, client_addr);
 }
