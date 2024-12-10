@@ -6,12 +6,12 @@
 
 #define MAX_TOP_SCORES 10
 
-struct ScoreBoard {
-    void add_game(const game& g);
+/*struct ScoreBoard {
+    void add_game(game& g);
     void print_sb_test();
 private:
     struct GameComparator {
-        bool operator()(const game& game_a, const game& game_b) const {
+        bool operator()(game& game_a, game& game_b) const {
             if (game_a.has_ended() != game::result::WON ||
                 game_b.has_ended() != game::result::WON)
                 return false;
@@ -24,6 +24,6 @@ private:
     };
     
     std::set<game, GameComparator> scoreboard;
-};
+};*/
 
 #endif

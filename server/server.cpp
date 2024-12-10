@@ -8,7 +8,7 @@
 
 static bool exit_server = false;
 
-static ScoreBoard sb; // TODO: change
+//static ScoreBoard sb; // TODO: change
 
 /* signal(SIGPIPE, SIG_IGN)
  * signal(SIGCHILD, SIG_IGN) ignorar estes 2 sinais
@@ -78,6 +78,10 @@ static net::action_status do_try(
 );
 
 int main() {
+	if (game::setup_directories() != 0) {
+		std::cout << "Failed to setup the " << DEFAULT_GAME_DIR << " directory.\n";
+		std::cout << "Shutting down.\n";
+	}
 	udp_main(DEFAULT_PORT);
 	std::cout << "Shutdown complete.\n";
 	return 0;
@@ -151,7 +155,13 @@ static net::action_status start_new_game(net::stream<net::udp_source>& req,
 		}
 		games.erase(gm);
 	}
-	games.emplace(std::move(fields[0]), game{static_cast<uint16_t>(std::stoul(fields[1]))});
+	status = games.emplace(std::move(fields[0]), game{static_cast<uint16_t>(std::stoul(fields[1]))});
+	if (status != net::action_status::OK) {
+		out_strm.write("ERR").prime(); // TODO: what to send in case of sv failure?
+		std::cout << out_strm.view();
+		udp_conn.answer(out_strm, client_addr);	
+		return status;
+	}
 	out_strm.write("OK").prime();
 	std::cout << out_strm.view();
 	return udp_conn.answer(out_strm, client_addr);

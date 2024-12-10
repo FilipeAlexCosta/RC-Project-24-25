@@ -2,7 +2,7 @@
 #include <iostream>
 
 
-void ScoreBoard::add_game(const game& g) {
+/*void ScoreBoard::add_game(game& g) {
     if (g.has_ended() != game::result::WON)
         return;
     scoreboard.insert(g);
@@ -15,4 +15,4 @@ void ScoreBoard::print_sb_test() {
     for (const auto& g: scoreboard) {
         std::cout << "" << rank << " - " << g.current_trial() << " " << g.secret_key() << '\n';
     }
-}
+}*/

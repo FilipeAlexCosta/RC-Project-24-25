@@ -1,5 +1,7 @@
 #include "game.hpp"
 
+#include <filesystem>
+
 game::game(uint16_t duration) : _duration{duration}, _debug{false} {
 	for (int i = 0; i < GUESS_SIZE; i++)
 		_secret_key[i] = net::VALID_COLORS[std::rand() % std::size(net::VALID_COLORS)];
@@ -11,12 +13,9 @@ game::game(uint16_t duration, const char secret_key[GUESS_SIZE])
 }
 
 std::pair<net::action_status, game::result> game::guess(const std::string& valid_plid, char play[GUESS_SIZE]) {
-	if (_curr_trial > '0' && last_trial()->nB == GUESS_SIZE)
-		return {net::action_status::OK, result::WON};
-	if (_curr_trial >= MAX_TRIALS)
-		return {net::action_status::OK, result::LOST_TRIES}; // ensures calls after finishing are correct
-	if (_start + _duration < std::time(nullptr))
-		return {net::action_status::OK, result::LOST_TIME};
+	result res = has_ended();
+	if (res != result::ONGOING)
+		return {net::action_status::OK, res};
 	for (int j = 0; j < GUESS_SIZE; j++)
 		_trials[_curr_trial - '0'].trial[j] = play[j];
 	auto [nB, nW] = compare(play);
@@ -29,11 +28,7 @@ std::pair<net::action_status, game::result> game::guess(const std::string& valid
 		_curr_trial--;
 		return {ok, result::ONGOING};
 	}
-	if (nB == GUESS_SIZE)
-		return {net::action_status::OK, result::WON};
-	if (_curr_trial >= MAX_TRIALS) // actual check
-		return {net::action_status::OK, result::LOST_TRIES};
-	return {net::action_status::OK, result::ONGOING};
+	return {net::action_status::OK, has_ended()};
 }
 
 std::pair<uint8_t, uint8_t> game::compare(const char guess[GUESS_SIZE]) {
@@ -64,20 +59,29 @@ std::pair<uint8_t, uint8_t> game::compare(const char guess[GUESS_SIZE]) {
 	return {nB, nW};
 }
 
-void game::undo_guess() {
-	if (_curr_trial == '0')
-		return;
-	_curr_trial--;
+game::result game::has_ended() {
+	if (_ended != result::ONGOING)
+		return _ended;
+	if (_curr_trial > '0' && last_trial()->nB == GUESS_SIZE) {
+		_ended = result::WON;
+	} else if (_curr_trial >= MAX_TRIALS) {
+		_ended = result::LOST_TRIES;
+	} else if (_start + _duration < std::time(nullptr)) {
+		_ended = result::LOST_TIME;
+	}
+	if (_ended == result::ONGOING)
+		return _ended;
+	_end = std::time(nullptr);
+	if (_end > _start + _duration)
+		_end = _start + _duration;
+	return _ended;
 }
 
-game::result game::has_ended() const {
-	if (_curr_trial > '0' && last_trial()->nB == GUESS_SIZE)
-		return result::WON;
-	if (_curr_trial >= MAX_TRIALS)
-		return result::LOST_TRIES;
-	if (_start + _duration < std::time(nullptr))
-		return result::LOST_TIME;
-	return result::ONGOING;
+void game::quit() {
+	_ended = result::QUIT;
+	_end = std::time(nullptr);
+	if (_end > _start + _duration)
+		_end = _start + _duration;
 }
 
 const char* game::secret_key() const {
@@ -108,18 +112,46 @@ const trial_record* game::last_trial() const {
 
 size_t game::time_left() const {
 	ssize_t diff = static_cast<ssize_t>(std::difftime(_start + _duration, std::time(nullptr)));
-	if (diff < 0)
+	if (diff < 0 || _ended != result::ONGOING)
 		return 0;
 	return static_cast<size_t>(diff);
 }
 
 size_t game::time_elapsed() const {
-	ssize_t diff = static_cast<ssize_t>(std::difftime(std::time(nullptr), _start));
-	return static_cast<size_t>(diff);
+	if (_ended != result::ONGOING)
+		return std::difftime(_end, _start);
+	size_t diff = std::difftime(std::time(nullptr), _start);
+	if (diff > _duration)
+		return _duration;
+	return diff;
 }
 
 std::string game::get_active_path(const std::string& valid_plid) {
-	return "STATE_" + valid_plid + ".txt";
+	return DEFAULT_GAME_DIR + ("/STATE_" + valid_plid + ".txt");
+}
+
+std::string game::get_final_path(const std::string& valid_plid) {
+	if (_ended == result::ONGOING)
+		return "";
+	std::tm* tm = std::gmtime(&_end);
+	std::stringstream strm;
+	strm << std::put_time(tm, "%F_%T");
+	if (!strm)
+		return "";
+	return get_final_dir(valid_plid) + '/' + strm.str() + ".txt";
+}
+
+std::string game::get_final_dir(const std::string& valid_plid) {
+	return DEFAULT_GAME_DIR + ('/' + valid_plid);
+}
+
+int game::setup_directories() {
+	try {
+		std::filesystem::create_directory(DEFAULT_GAME_DIR);
+	} catch (...) {
+		return 1;
+	}
+	return 0;
 }
 
 net::action_status game::write_header(std::ostream& out, const std::string& valid_plid) const {
@@ -132,9 +164,8 @@ net::action_status game::write_header(std::ostream& out, const std::string& vali
 		out << 'P';
 	out << DEFAULT_SEP << _secret_key << DEFAULT_SEP << _duration << DEFAULT_SEP;
 	std::tm* tm = std::gmtime(&_start);
-	out << (tm->tm_year + 1900) << '-' << tm->tm_mon << '-' << tm->tm_mday << DEFAULT_SEP;
-	out << tm->tm_hour << ':' << tm->tm_min << ':' << tm->tm_sec << DEFAULT_SEP;
-	out << _start << DEFAULT_EOM;
+	out << std::put_time(tm, "%F %T") << DEFAULT_SEP;
+	out << _start << DEFAULT_EOM << std::flush;
 	if (!out)
 		return net::action_status::PERSIST_ERR;
 	return net::action_status::OK;
@@ -149,28 +180,22 @@ net::action_status game::write_last_trial(std::ostream& out) const {
 	out << std::string_view{_trials[_curr_trial - '0' - 1].trial, GUESS_SIZE} << DEFAULT_SEP;
 	out << std::to_string(_trials[_curr_trial - '0' - 1].nB) << DEFAULT_SEP;
 	out << std::to_string(_trials[_curr_trial - '0' - 1].nW) << DEFAULT_SEP;
-	out << std::to_string(time_elapsed()) << DEFAULT_EOM; // check for exceptions possibly
+	out << std::to_string(time_elapsed()) << DEFAULT_EOM << std::flush;
+	// TODO: check for exceptions possibly
 	if (!out)
 		return net::action_status::PERSIST_ERR;
 	return net::action_status::OK;
 }
 
-net::action_status game::write_termination(std::ostream& out) const {
+net::action_status game::write_termination(std::ostream& out) {
 	if (!out)
 		return net::action_status::PERSIST_ERR;
-	auto end_type = has_ended();
-	char reason = 0;
-	switch (end_type) {
-		case result::WON: reason = 'W'; break;
-		case result::LOST_TIME: reason = 'T'; break;
-		case result::LOST_TRIES: reason = 'F'; break;
-		case result::ONGOING: reason = 'Q'; // assume QUIT
-	}
-	out << reason << DEFAULT_SEP;
-	std::time_t end_time = std::time(nullptr);
-	std::tm* tm = std::gmtime(&end_time);
-	out << (tm->tm_year + 1900) << '-' << tm->tm_mon << '-' << tm->tm_mday << DEFAULT_SEP;
-	out << tm->tm_hour << ':' << tm->tm_min << ':' << tm->tm_sec << DEFAULT_EOM;
+	has_ended();
+	if (_ended == result::ONGOING)
+		quit();
+	out << static_cast<char>(_ended) << DEFAULT_SEP;
+	std::tm* tm = std::gmtime(&_end);
+	out << std::put_time(tm, "%F %T") << std::flush;
 	if (!out)
 		return net::action_status::PERSIST_ERR;
 	return net::action_status::OK;
@@ -187,10 +212,23 @@ active_games::map_type::iterator active_games::end() {
 net::action_status active_games::erase(const map_type::iterator& it) {
 	if (it == std::end(_games))
 		return net::action_status::OK;
-	std::fstream out{game::get_active_path(it->first), std::ios::out | std::ios::app};
-	auto ok = it->second.write_termination(out);
-	if (ok != net::action_status::OK)
-		return ok; // TODO: move to another file
+	auto ok = net::action_status::OK;
+	try {
+		auto act_path = game::get_active_path(it->first);
+		std::fstream out{game::get_active_path(it->first), std::ios::out | std::ios::app};
+		ok = it->second.write_termination(out);
+		if (ok != net::action_status::OK)
+			return ok;
+		std::string dest_path = it->second.get_final_path(it->first);
+		if (dest_path.length() == 0)
+			return net::action_status::PERSIST_ERR;
+		std::filesystem::create_directory(game::get_final_dir(it->first));
+		std::filesystem::rename(act_path, dest_path);
+	} catch (std::filesystem::filesystem_error& err) {
+		return net::action_status::PERSIST_ERR;
+	} catch (std::bad_alloc& err) {
+		return net::action_status::PERSIST_ERR; // TODO: this seems worse than PERSIST_ERR
+	}
 	_games.erase(it);
 	return net::action_status::OK;
 }
