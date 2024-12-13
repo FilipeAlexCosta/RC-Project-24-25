@@ -263,6 +263,7 @@ struct udp_connection {
 	std::pair<action_status, stream<udp_source>> request(const out_stream& msg, other_address& other);
 	action_status answer(const out_stream& msg, const other_address& other) const;
 	std::pair<action_status, stream<udp_source>> listen(other_address& other);
+	int get_fildes(); // careful with this
 private:
 	self_address _self;
 	int _fd{-1};
@@ -290,6 +291,7 @@ struct tcp_server : protected tcp_connection {
 	tcp_server(const self_address& self, size_t sub_conns = DEFAULT_LISTEN_CONNS);
 	std::pair<action_status, tcp_connection> accept_client(other_address& other);
 	bool valid() const;
+	int get_fildes(); // careful with this
 };
 
 action_status is_valid_plid(const field& field);

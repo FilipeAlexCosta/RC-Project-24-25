@@ -160,6 +160,10 @@ std::pair<action_status, stream<udp_source>> udp_connection::listen(other_addres
 	return {action_status::OK, {std::string_view{_buf, static_cast<size_t>(n)}}};
 }
 
+int udp_connection::get_fildes() {
+	return _fd;
+}
+
 tcp_connection::tcp_connection() : _fd{-1} {}
 
 tcp_connection::tcp_connection(int fd) : _fd{fd} {
@@ -249,6 +253,10 @@ std::pair<action_status, tcp_connection> tcp_server::accept_client(other_address
 
 bool tcp_server::valid() const {
 	return tcp_connection::valid();
+}
+
+int tcp_server::get_fildes() {
+	return _fd;
 }
 
 bool source::found_eom() const {

@@ -5,6 +5,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fcntl.h>
+#include <sys/wait.h>
 
 #define DEFAULT_PORT "58016"
 
@@ -49,8 +50,20 @@ static bool has_ongoing_game(int plid) { // TODO: incorporate this in template ?
 	return ongoing_games.find(plid) != ongoing_games.end();
 }*/
 
-static void udp_main(const std::string& port);
-static void tcp_main(const std::string& port);
+using udp_action_map = net::action_map<
+	net::udp_source,
+	const net::udp_connection&,
+	const net::other_address&,
+	active_games&
+>;
+
+using tcp_action_map = net::action_map<
+	net::tcp_source,
+	const net::tcp_connection&
+>;
+
+static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions, active_games& games);
+static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions);
 
 static net::action_status start_new_game(
 	net::stream<net::udp_source>& req,
@@ -90,78 +103,83 @@ int main() {
 		std::cout << "Failed to setup the " << DEFAULT_GAME_DIR << " directory.\n";
 		std::cout << "Shutting down.\n";
 	}
-	udp_main(DEFAULT_PORT);
+	net::udp_connection udp_conn{{DEFAULT_PORT, SOCK_DGRAM}};
+	if (!udp_conn.valid()) {
+		std::cout << "Failed to open udp connection at " << DEFAULT_PORT << ".\n";
+		return 1;
+	}
+	net::tcp_server tcp_sv{{DEFAULT_PORT, SOCK_STREAM}};
+	if (!tcp_sv.valid()) {
+		std::cout << "Failed to open tcp connection at " << DEFAULT_PORT << ".\n";
+		return 1;
+	}
+
+	std::srand(std::time(nullptr));
+	udp_action_map udp_actions;
+	udp_actions.add_action("SNG", start_new_game);
+	udp_actions.add_action("QUT", end_game);
+	udp_actions.add_action("DBG", start_new_game_debug);
+	udp_actions.add_action("TRY", do_try);
+	tcp_action_map tcp_actions;
+	tcp_actions.add_action("STR", show_trials);
+	//actions.add_action("SSB", end_game);
+	active_games games;
+
+	fd_set r_fds;
+	int max_fd = udp_conn.get_fildes();
+	if (tcp_sv.get_fildes() > max_fd)
+		max_fd = tcp_sv.get_fildes();
+	while (!exit_server) {
+		FD_ZERO(&r_fds);
+		FD_SET(udp_conn.get_fildes(), &r_fds);
+		FD_SET(tcp_sv.get_fildes(), &r_fds);
+		int counter = select(max_fd + 1, &r_fds, nullptr, nullptr, nullptr);
+		if (counter <= 0) {
+			std::cout << "Failed to select the udp/tcp connection.\n";
+			return 1;
+		}
+		net::action_status status[2];
+		if (FD_ISSET(udp_conn.get_fildes(), &r_fds))
+			status[0] = handle_udp(udp_conn, udp_actions, games);
+		if (FD_ISSET(tcp_sv.get_fildes(), &r_fds))
+			status[1] = handle_tcp(tcp_sv, tcp_actions);
+		for (auto stat : status)
+			if (stat != net::action_status::OK)
+				std::cerr << net::status_to_message(stat) << '.' << std::endl;
+	}
+	//udp_main(DEFAULT_PORT);
 //	tcp_main(DEFAULT_PORT);
-	std::cout << "Shutdown complete.\n";
 	return 0;
 }
 
-static void udp_main(const std::string& port) {
-	std::srand(std::time(nullptr));
-	net::action_map<
-		net::udp_source,
-		const net::udp_connection&,
-		const net::other_address&,
-		active_games&
-	> actions;
-	actions.add_action("SNG", start_new_game);
-	actions.add_action("QUT", end_game);
-	actions.add_action("DBG", start_new_game_debug);
-	actions.add_action("TRY", do_try);
-	net::udp_connection udp_conn{{port, SOCK_DGRAM}};
-	if (!udp_conn.valid()) {
-		std::cout << "Failed to open udp connection at " << port << '.';
-		std::cout << "UDP server shutting down...\n";
-		return;
+static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions, active_games& games) {
+	net::other_address client_addr;
+	auto [status, request] = udp_conn.listen(client_addr);
+	if (status != net::action_status::OK)
+		return status;
+	status = actions.execute(request, udp_conn, client_addr, games);
+	if (status == net::action_status::UNK_ACTION) {
+		net::out_stream out;
+		out.write("ERR").prime();
+		return udp_conn.answer(out, client_addr);
 	}
-	active_games games;
-
-	while (!exit_server) {
-		net::other_address client_addr;
-		auto [status, request] = udp_conn.listen(client_addr);
-		status = actions.execute(request, udp_conn, client_addr, games);
-		if (status == net::action_status::UNK_ACTION) {
-			net::out_stream out;
-			out.write("ERR").prime();
-			udp_conn.answer(out, client_addr);
-			continue;
-		}
-		if (status != net::action_status::OK)
-			std::cerr << net::status_to_message(status) << '.' << std::endl;
-	}
-
-	std::cout << "UDP server shutting down...\n";
-	return;
+	return status;
 }
 
-static void tcp_main(const std::string& port) {
-	net::action_map<
-		net::tcp_source,
-		const net::tcp_connection&
-	> actions;
-	actions.add_action("STR", show_trials);
-	//actions.add_action("SSB", end_game);
-	net::tcp_server tcp_sv{{port, SOCK_STREAM}};
-	active_games games;
-
-	while (!exit_server) {
-		net::other_address client_addr;
-		auto [status, tcp_conn] = tcp_sv.accept_client(client_addr);
-		// TODO: fork
-		net::stream<net::tcp_source> request = tcp_conn.to_stream();
-		status = actions.execute(request, tcp_conn);
-		if (status == net::action_status::UNK_ACTION) {
-			net::out_stream out;
-			out.write("ERR").prime();
-			tcp_conn.answer(out);
-			continue;
-		}
-		if (status != net::action_status::OK)
-			std::cerr << net::status_to_message(status) << '.' << std::endl;
+static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions) {
+	net::other_address client_addr;
+	auto [status, tcp_conn] = tcp_sv.accept_client(client_addr);
+	if (status != net::action_status::OK)
+		return status;
+	// TODO: fork
+	net::stream<net::tcp_source> request = tcp_conn.to_stream();
+	status = actions.execute(request, tcp_conn);
+	if (status == net::action_status::UNK_ACTION) {
+		net::out_stream out;
+		out.write("ERR").prime();
+		return tcp_conn.answer(out);
 	}
-
-	std::cout << "UDP server shutting down...\n";
-	return;
+	return status;
 }
 
 static net::action_status start_new_game(net::stream<net::udp_source>& req,
@@ -390,14 +408,19 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	out_strm.write(gm->second.last_trial()->nB + '0');
 	out_strm.write(gm->second.last_trial()->nW + '0').prime();
 	std::cout << out_strm.view();
-
+	auto erase_status = net::action_status::OK;
+	if (play_res == game::result::WON)
+		erase_status = games.erase(gm);
 	// Testing sb
 	// if (gm->second.has_ended() == game::result::WON) {
 	// 	sb.add_game(gm->second);
 	// 	sb.print_sb_test();
 	// }
 
-	return udp_conn.answer(out_strm, client_addr);
+	auto send_status = udp_conn.answer(out_strm, client_addr);
+	if (erase_status != net::action_status::OK)
+		return erase_status;
+	return send_status;
 }
 
 static net::action_status show_trials(net::stream<net::tcp_source>& req,
@@ -420,10 +443,11 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 		return tcp_conn.answer(out_strm);
 	}
 
-	if (errno != ENOENT) {
+	if (game_fd != -1) {
 		out_strm.write("ACT");
 		net::stream<net::file_source> source{{game_fd}};
 		std::cout << game::prepare_trial_file(source) << std::endl;
+		close(game_fd);
 		return net::action_status::OK;
 	}
 
@@ -451,5 +475,6 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 	out_strm.write("FIN");
 	net::stream<net::file_source> source{{game_fd}};
 	std::cout << game::prepare_trial_file(source) << std::endl;
+	close(game_fd);
 	return net::action_status::OK;
 }
