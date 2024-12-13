@@ -146,7 +146,7 @@ struct stream {
 	std::pair<action_status, std::string> read(size_t min_len, size_t max_len, bool check_eom = true) {
 		if (min_len > max_len || min_len == 0)
 			return {action_status::OK, {}};
-		if (_source.found_eom())
+		if (_source.finished())
 			return {action_status::MISSING_ARG, {}};
 		field buf;
 		size_t bytes_read = 0;
@@ -279,15 +279,16 @@ struct tcp_connection {
 	tcp_connection& operator=(tcp_connection&& other);
 	~tcp_connection();
 	bool valid() const;
-	std::pair<action_status, stream<tcp_source>> request(const out_stream& msg);
-	action_status answer(const out_stream& msg);
+	std::pair<action_status, stream<tcp_source>> request(const out_stream& msg) const;
+	net::stream<net::tcp_source> to_stream() const;
+	action_status answer(const out_stream& msg) const;
 protected:
 	int _fd{-1};
 };
 
 struct tcp_server : protected tcp_connection {
 	tcp_server(const self_address& self, size_t sub_conns = DEFAULT_LISTEN_CONNS);
-	std::pair<action_status, tcp_connection> accept_client(const out_stream& msg, other_address& other);
+	std::pair<action_status, tcp_connection> accept_client(other_address& other);
 	bool valid() const;
 };
 

@@ -43,6 +43,8 @@ struct game {
 	std::string get_final_path(const std::string& valid_plid);
 	static std::string get_active_path(const std::string& valid_plid);
 	static std::string get_final_dir(const std::string& valid_plid);
+	static std::string get_latest_path(const std::string& valid_plid);
+	static std::string prepare_trial_file(net::stream<net::file_source>& stream);
 	static int setup_directories();
 private:
 	std::pair<uint8_t, uint8_t> compare(const char guess[GUESS_SIZE]);

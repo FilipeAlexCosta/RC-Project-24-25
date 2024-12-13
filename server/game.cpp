@@ -156,6 +156,114 @@ std::string game::get_final_dir(const std::string& valid_plid) {
 	return DEFAULT_GAME_DIR + ('/' + valid_plid);
 }
 
+std::string game::get_latest_path(const std::string& valid_plid) {
+	std::string dirp = get_final_dir(valid_plid);
+	std::string path = "";
+	for (const auto& file : std::filesystem::directory_iterator{dirp}) {
+		if (file.is_regular_file() &&
+			file.path().filename().string() > path)
+			path = file.path().filename().string();
+	}
+	return dirp + '/' + path;
+}
+
+std::string game::prepare_trial_file(net::stream<net::file_source>& stream) {
+	std::string header{};
+	auto curr = stream.read(PLID_SIZE, PLID_SIZE); // read PLID
+	if (curr.first != net::action_status::OK)
+		return "";
+	std::string plid = std::move(curr.second);
+	curr = stream.read(1, 1);
+	if (curr.first != net::action_status::OK)
+		return "";
+	char game_type = curr.second[0];
+	curr = stream.read(GUESS_SIZE, GUESS_SIZE);
+	if (curr.first != net::action_status::OK)
+		return "";
+	std::string secret_key = std::move(curr.second);
+	curr = stream.read(1, MAX_PLAYTIME_SIZE);
+	if (curr.first != net::action_status::OK)
+		return "";
+	std::string playtime = std::move(curr.second);
+	curr = stream.read(1, SIZE_MAX);
+	if (curr.first != net::action_status::OK)
+		return "";
+	header.append("Game initiated: ");
+	header.append(curr.second + ' ');
+	curr = stream.read(1, SIZE_MAX);
+	if (curr.first != net::action_status::OK)
+		return "";
+	header.append(curr.second);
+	header.append(" with ");
+	header.append(playtime);
+	header.append(" seconds to be completed.\n");
+	curr = stream.read(1, SIZE_MAX);
+	if (curr.first != net::action_status::OK)
+		return "";
+	std::time_t start_time = std::stoul(curr.second); // TODO: catch exceptions
+	std::string trials{};
+	bool found_term_reason = false;
+	char trial_count = '0';
+	while (!stream.finished()) {
+		curr = stream.read(1, 1); // trial number or end reason
+		if (curr.second[0] < '1' || curr.second[0] > MAX_TRIALS) {
+			found_term_reason = true;
+			break;
+		}
+		curr = stream.read(GUESS_SIZE, GUESS_SIZE); // trial
+		trials.append("Trial: " + curr.second);
+		curr = stream.read(1, 1); // black
+		trials.append(", nB: " + curr.second);
+		curr = stream.read(1, 1); // white
+		trials.append(", nW: " + curr.second);
+		curr = stream.read(1, MAX_PLAYTIME_SIZE); // timestamp
+		trials.append(" at " + curr.second + "s\n");
+		trial_count++;
+	}
+	if (trial_count == 0) // no trials
+		trials.append("Game started - no transactions found\n");
+	else
+		trials = std::string{"     --- Transactions found: "} + trial_count + " ---\n\n" + trials;
+	if (found_term_reason) {
+		header.append("Mode: ");
+		if (game_type == 'P')
+			header.append("PLAY ");
+		else
+			header.append("DEBUG ");
+		header.append(" Secret code: ");
+		header.append(secret_key);
+		header.append("\n\n");
+		trials.append("     Termination: ");
+		switch (curr.second[0]) {
+			case static_cast<char>(result::WON):
+				trials.append("WON ");
+				break;
+			case static_cast<char>(result::QUIT):
+				trials.append("QUIT ");
+				break;
+			case static_cast<char>(result::LOST_TIME):
+				trials.append("TIMEOUT ");
+				break;
+			case static_cast<char>(result::LOST_TRIES):
+				trials.append("FAIL ");
+			default:
+				return ""; // TODO: check here
+		}
+		curr = stream.read(1, SIZE_MAX);
+		trials.append("at ");
+		trials.append(curr.second);
+		curr = stream.read(1, SIZE_MAX);
+		trials.push_back(' ');
+		trials.append(curr.second); // TODO add duration here (may append time size_t and at End of file)
+		trials.push_back('\n');
+		return header + trials;
+	}
+	trials.append("\n  -- ");
+	trials.append(std::to_string(std::difftime(std::time(nullptr), start_time))); // TODO: check exceptions
+	trials.append(" seconds remaining to be completed --\n");
+	return header + trials;
+}
+
 int game::setup_directories() {
 	try {
 		std::filesystem::create_directory(DEFAULT_GAME_DIR);
@@ -176,7 +284,7 @@ net::action_status game::write_header(std::ostream& out, const std::string& vali
 	out << DEFAULT_SEP << _secret_key << DEFAULT_SEP << _duration << DEFAULT_SEP;
 	std::tm* tm = std::gmtime(&_start);
 	out << std::put_time(tm, "%F %T") << DEFAULT_SEP;
-	out << _start << DEFAULT_EOM << std::flush;
+	out << _start << std::flush;
 	if (!out)
 		return net::action_status::PERSIST_ERR;
 	return net::action_status::OK;
@@ -187,12 +295,12 @@ net::action_status game::write_last_trial(std::ostream& out) const {
 		return net::action_status::PERSIST_ERR;
 	if (_curr_trial == '0')
 		return net::action_status::OK;
-	out << _curr_trial << DEFAULT_SEP;
+	out << DEFAULT_SEP << _curr_trial << DEFAULT_SEP;
 	out << std::string_view{_trials[_curr_trial - '0' - 1].trial, GUESS_SIZE} << DEFAULT_SEP;
 	out << std::to_string(_trials[_curr_trial - '0' - 1].nB) << DEFAULT_SEP;
 	out << std::to_string(_trials[_curr_trial - '0' - 1].nW) << DEFAULT_SEP;
-	out << std::to_string(time_elapsed()) << DEFAULT_EOM << std::flush;
-	// TODO: check for exceptions possibly
+	out << std::to_string(time_elapsed()) << std::flush;
+	// TODO: check for exceptions
 	if (!out)
 		return net::action_status::PERSIST_ERR;
 	return net::action_status::OK;
@@ -204,7 +312,7 @@ net::action_status game::write_termination(std::ostream& out) {
 	has_ended();
 	if (_ended == result::ONGOING)
 		quit();
-	out << static_cast<char>(_ended) << DEFAULT_SEP;
+	out << DEFAULT_SEP << static_cast<char>(_ended) << DEFAULT_SEP;
 	std::tm* tm = std::gmtime(&_end);
 	out << std::put_time(tm, "%F %T") << std::flush;
 	if (!out)

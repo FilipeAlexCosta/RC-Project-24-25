@@ -3,6 +3,8 @@
 
 #include <iostream>
 #include <ctime>
+#include <filesystem>
+#include <fcntl.h>
 
 #define DEFAULT_PORT "58016"
 
@@ -48,6 +50,7 @@ static bool has_ongoing_game(int plid) { // TODO: incorporate this in template ?
 }*/
 
 static void udp_main(const std::string& port);
+static void tcp_main(const std::string& port);
 
 static net::action_status start_new_game(
 	net::stream<net::udp_source>& req,
@@ -77,17 +80,23 @@ static net::action_status do_try(
 	active_games& games
 );
 
+static net::action_status show_trials(
+	net::stream<net::tcp_source>& req,
+	const net::tcp_connection& tcp_conn
+);
+
 int main() {
 	if (game::setup_directories() != 0) {
 		std::cout << "Failed to setup the " << DEFAULT_GAME_DIR << " directory.\n";
 		std::cout << "Shutting down.\n";
 	}
 	udp_main(DEFAULT_PORT);
+//	tcp_main(DEFAULT_PORT);
 	std::cout << "Shutdown complete.\n";
 	return 0;
 }
 
-void udp_main(const std::string& port) {
+static void udp_main(const std::string& port) {
 	std::srand(std::time(nullptr));
 	net::action_map<
 		net::udp_source,
@@ -100,6 +109,11 @@ void udp_main(const std::string& port) {
 	actions.add_action("DBG", start_new_game_debug);
 	actions.add_action("TRY", do_try);
 	net::udp_connection udp_conn{{port, SOCK_DGRAM}};
+	if (!udp_conn.valid()) {
+		std::cout << "Failed to open udp connection at " << port << '.';
+		std::cout << "UDP server shutting down...\n";
+		return;
+	}
 	active_games games;
 
 	while (!exit_server) {
@@ -110,6 +124,36 @@ void udp_main(const std::string& port) {
 			net::out_stream out;
 			out.write("ERR").prime();
 			udp_conn.answer(out, client_addr);
+			continue;
+		}
+		if (status != net::action_status::OK)
+			std::cerr << net::status_to_message(status) << '.' << std::endl;
+	}
+
+	std::cout << "UDP server shutting down...\n";
+	return;
+}
+
+static void tcp_main(const std::string& port) {
+	net::action_map<
+		net::tcp_source,
+		const net::tcp_connection&
+	> actions;
+	actions.add_action("STR", show_trials);
+	//actions.add_action("SSB", end_game);
+	net::tcp_server tcp_sv{{port, SOCK_STREAM}};
+	active_games games;
+
+	while (!exit_server) {
+		net::other_address client_addr;
+		auto [status, tcp_conn] = tcp_sv.accept_client(client_addr);
+		// TODO: fork
+		net::stream<net::tcp_source> request = tcp_conn.to_stream();
+		status = actions.execute(request, tcp_conn);
+		if (status == net::action_status::UNK_ACTION) {
+			net::out_stream out;
+			out.write("ERR").prime();
+			tcp_conn.answer(out);
 			continue;
 		}
 		if (status != net::action_status::OK)
@@ -354,4 +398,58 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	// }
 
 	return udp_conn.answer(out_strm, client_addr);
+}
+
+static net::action_status show_trials(net::stream<net::tcp_source>& req,
+									  const net::tcp_connection& tcp_conn) {
+	auto [status, plid] = req.read(PLID_SIZE, PLID_SIZE);
+	net::out_stream out_strm;
+	out_strm.write("RST");
+	if (status != net::action_status::OK ||
+		(status = req.no_more_fields()) != net::action_status::OK ||
+		(status = net::is_valid_plid(plid)) != net::action_status::OK) {
+		out_strm.write("NOK").prime();
+		std::cout << out_strm.view();
+		return tcp_conn.answer(out_strm);
+	}
+
+	int game_fd = open(game::get_active_path(plid).c_str(), O_RDONLY);
+	if (game_fd == -1 && errno != ENOENT) {
+		out_strm.write("NOK").prime();
+		std::cout << out_strm.view();
+		return tcp_conn.answer(out_strm);
+	}
+
+	if (errno != ENOENT) {
+		out_strm.write("ACT");
+		net::stream<net::file_source> source{{game_fd}};
+		std::cout << game::prepare_trial_file(source) << std::endl;
+		return net::action_status::OK;
+	}
+
+	std::string path;
+	try {
+		path = game::get_latest_path(plid);
+	} catch (...) { // TODO: finer exceptions
+		out_strm.write("NOK").prime();
+		std::cout << out_strm.view();
+		tcp_conn.answer(out_strm);
+		return net::action_status::PERSIST_ERR;
+	}
+
+	if (path.empty()) {
+		out_strm.write("NOK").prime();
+		std::cout << out_strm.view();
+		return tcp_conn.answer(out_strm);
+	}
+	if ((game_fd = open(path.c_str(), O_RDONLY)) == -1) {
+		out_strm.write("NOK").prime();
+		std::cout << out_strm.view();
+		tcp_conn.answer(out_strm);
+		return net::action_status::PERSIST_ERR;
+	}
+	out_strm.write("FIN");
+	net::stream<net::file_source> source{{game_fd}};
+	std::cout << game::prepare_trial_file(source) << std::endl;
+	return net::action_status::OK;
 }

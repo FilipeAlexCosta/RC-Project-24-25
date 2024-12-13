@@ -18,7 +18,7 @@ self_address::self_address(const std::string_view& other_addr, const std::string
 	}
 }
 
-self_address::self_address(const std::string_view& other_port, int family, int socktype)
+self_address::self_address(const std::string_view& other_port, int socktype, int family)
 	: _fam{family}, _sockt{socktype}, _passive{true} {
 	addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
@@ -202,16 +202,27 @@ bool tcp_connection::valid() const {
 	return _fd != -1;
 }
 
-std::pair<action_status, stream<tcp_source>> tcp_connection::request(const out_stream& msg) {
+std::pair<action_status, stream<tcp_source>> tcp_connection::request(const out_stream& msg) const {
+	action_status status = answer(msg);
+	if (status != action_status::OK)
+		return {status, {-1}};
+	return {action_status::OK, {_fd}};
+}
+
+stream<tcp_source> tcp_connection::to_stream() const {
+	return stream<tcp_source>{_fd};
+}
+
+action_status tcp_connection::answer(const out_stream& out) const {
 	int done = 0;
-	auto view = msg.view();
+	auto view = out.view();
 	while (done < view.size()) {
 		int n = write(_fd, view.data() + done, view.size() - done);
 		if (n <= 0)
-			return {action_status::SEND_ERR, {-1}};
+			return action_status::SEND_ERR;
 		done += n;
 	}
-	return {net::action_status::OK, {_fd}};
+	return action_status::OK;
 }
 
 tcp_server::tcp_server(const self_address& self, size_t sub_conns) : tcp_connection{self} {
@@ -225,7 +236,7 @@ tcp_server::tcp_server(const self_address& self, size_t sub_conns) : tcp_connect
 	}
 }
 
-std::pair<action_status, tcp_connection> tcp_server::accept_client(const out_stream& msg, other_address& other) {
+std::pair<action_status, tcp_connection> tcp_server::accept_client(other_address& other) {
 	int new_fd = -1;
 	other.addrlen = sizeof(other.addr);
 	if ((new_fd = accept(_fd, (sockaddr*) &other.addr, &other.addrlen)) == -1)
