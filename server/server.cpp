@@ -446,9 +446,12 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 	if (game_fd != -1) {
 		out_strm.write("ACT");
 		net::stream<net::file_source> source{{game_fd}};
-		std::cout << game::prepare_trial_file(source) << std::endl;
-		close(game_fd);
-		return net::action_status::OK;
+		std::string sent_file = game::prepare_trial_file(source);
+		close(game_fd); // TODO: check if sent_file is good + check if close was sucessful
+		out_strm.write(game::get_fname(plid));
+		out_strm.write(std::to_string(sent_file.size())); // TODO: excp?
+		out_strm.write(sent_file).prime();
+		return tcp_conn.answer(out_strm);
 	}
 
 	std::string path;
@@ -474,7 +477,10 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 	}
 	out_strm.write("FIN");
 	net::stream<net::file_source> source{{game_fd}};
-	std::cout << game::prepare_trial_file(source) << std::endl;
-	close(game_fd);
-	return net::action_status::OK;
+	std::string sent_file = game::prepare_trial_file(source);
+	close(game_fd); // TODO: check if sent_file is good + check if close was sucessful
+	out_strm.write(game::get_fname(plid));
+	out_strm.write(std::to_string(sent_file.size())); // TODO: excep?
+	out_strm.write(sent_file).prime();
+	return tcp_conn.answer(out_strm);
 }

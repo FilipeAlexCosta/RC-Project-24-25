@@ -41,6 +41,7 @@ struct game {
 	net::action_status write_header(std::ostream& out, const std::string& valid_plid) const;
 	net::action_status write_termination(std::ostream& out);
 	std::string get_final_path(const std::string& valid_plid);
+	static std::string get_fname(const std::string& valid_plid);
 	static std::string get_active_path(const std::string& valid_plid);
 	static std::string get_final_dir(const std::string& valid_plid);
 	static std::string get_latest_path(const std::string& valid_plid);

@@ -137,8 +137,12 @@ uint32_t game::score() const {
 	return static_cast<uint32_t>(res * (MAX_SCORE - MIN_SCORE) + MIN_SCORE);
 }
 
+std::string game::get_fname(const std::string& valid_plid) {
+	return "STATE_" + valid_plid + ".txt";
+}
+
 std::string game::get_active_path(const std::string& valid_plid) {
-	return DEFAULT_GAME_DIR + ("/STATE_" + valid_plid + ".txt");
+	return DEFAULT_GAME_DIR + ('/' + get_fname(valid_plid));
 }
 
 std::string game::get_final_path(const std::string& valid_plid) {
@@ -198,7 +202,7 @@ std::string game::prepare_trial_file(net::stream<net::file_source>& stream) {
 	header.append(playtime);
 	header.append(" seconds to be completed.\n");
 	curr = stream.read(1, SIZE_MAX);
-	if (curr.first != net::action_status::OK)
+	if (curr.first != net::action_status::OK && !stream.finished())
 		return "";
 	std::time_t start_time = std::stoul(curr.second); // TODO: catch exceptions
 	std::string trials{};
@@ -220,7 +224,7 @@ std::string game::prepare_trial_file(net::stream<net::file_source>& stream) {
 		trials.append(" at " + curr.second + "s\n");
 		trial_count++;
 	}
-	if (trial_count == 0) // no trials
+	if (trial_count == '0') // no trials
 		trials.append("Game started - no transactions found\n");
 	else
 		trials = std::string{"     --- Transactions found: "} + trial_count + " ---\n\n" + trials;
@@ -259,7 +263,7 @@ std::string game::prepare_trial_file(net::stream<net::file_source>& stream) {
 		return header + trials;
 	}
 	trials.append("\n  -- ");
-	trials.append(std::to_string(std::difftime(std::time(nullptr), start_time))); // TODO: check exceptions
+	trials.append(std::to_string(static_cast<uint16_t>(std::difftime(std::time(nullptr), start_time)))); // TODO: check exceptions
 	trials.append(" seconds remaining to be completed --\n");
 	return header + trials;
 }
