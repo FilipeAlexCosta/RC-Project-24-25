@@ -1,5 +1,5 @@
 #include "game.hpp"
-#include "scoreboard.hpp" // TODO: change
+#include "scoreboard.hpp"
 
 #include <iostream>
 #include <ctime>
@@ -10,8 +10,6 @@
 #define DEFAULT_PORT "58016"
 
 static bool exit_server = false;
-
-//static ScoreBoard sb; // TODO: change
 
 /* signal(SIGPIPE, SIG_IGN)
  * signal(SIGCHILD, SIG_IGN) ignorar estes 2 sinais
@@ -54,48 +52,57 @@ using udp_action_map = net::action_map<
 	net::udp_source,
 	const net::udp_connection&,
 	const net::other_address&,
-	active_games&
+	active_games&,
+	score_board&
 >;
 
 using tcp_action_map = net::action_map<
 	net::tcp_source,
-	const net::tcp_connection&
+	const net::tcp_connection&,
+	score_board&
 >;
 
-static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions, active_games& games);
-static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions);
+static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions, active_games& games, score_board& sb);
+static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions, score_board& sb);
 
 static net::action_status start_new_game(
 	net::stream<net::udp_source>& req,
 	const net::udp_connection& udp_conn,
 	const net::other_address& client_addr,
-	active_games& games
+	active_games& games, score_board& sb
 );
 
 static net::action_status end_game(
 	net::stream<net::udp_source>& req,
 	const net::udp_connection& udp_conn,
 	const net::other_address& client_addr,
-	active_games& games
+	active_games& games, score_board& sb
 );
 
 static net::action_status start_new_game_debug(
 	net::stream<net::udp_source>& req,
 	const net::udp_connection& udp_conn,
 	const net::other_address& client_addr,
-	active_games& games
+	active_games& games, score_board& sb
 );
 
 static net::action_status do_try(
 	net::stream<net::udp_source>& req,
 	const net::udp_connection& udp_conn,
 	const net::other_address& client_addr,
-	active_games& games
+	active_games& games, score_board& sb
 );
 
 static net::action_status show_trials(
 	net::stream<net::tcp_source>& req,
-	const net::tcp_connection& tcp_conn
+	const net::tcp_connection& tcp_conn,
+	score_board& sb
+);
+
+static net::action_status show_scoreboard(
+	net::stream<net::tcp_source>& req,
+	const net::tcp_connection& tcp_conn,
+	score_board& sb
 );
 
 int main() {
@@ -122,8 +129,10 @@ int main() {
 	udp_actions.add_action("TRY", do_try);
 	tcp_action_map tcp_actions;
 	tcp_actions.add_action("STR", show_trials);
-	//actions.add_action("SSB", end_game);
+	tcp_actions.add_action("SSB", show_scoreboard);
+	
 	active_games games;
+	score_board sb;
 
 	fd_set r_fds;
 	int max_fd = udp_conn.get_fildes();
@@ -140,24 +149,24 @@ int main() {
 		}
 		net::action_status status[2];
 		if (FD_ISSET(udp_conn.get_fildes(), &r_fds))
-			status[0] = handle_udp(udp_conn, udp_actions, games);
+			status[0] = handle_udp(udp_conn, udp_actions, games, sb);
 		if (FD_ISSET(tcp_sv.get_fildes(), &r_fds))
-			status[1] = handle_tcp(tcp_sv, tcp_actions);
+			status[1] = handle_tcp(tcp_sv, tcp_actions, sb);
 		for (auto stat : status)
 			if (stat != net::action_status::OK)
 				std::cerr << net::status_to_message(stat) << '.' << std::endl;
 	}
 	//udp_main(DEFAULT_PORT);
-//	tcp_main(DEFAULT_PORT);
+	//tcp_main(DEFAULT_PORT);
 	return 0;
 }
 
-static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions, active_games& games) {
+static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions, active_games& games, score_board& sb) {
 	net::other_address client_addr;
 	auto [status, request] = udp_conn.listen(client_addr);
 	if (status != net::action_status::OK)
 		return status;
-	status = actions.execute(request, udp_conn, client_addr, games);
+	status = actions.execute(request, udp_conn, client_addr, games, sb);
 	if (status == net::action_status::UNK_ACTION) {
 		net::out_stream out;
 		out.write("ERR").prime();
@@ -166,14 +175,14 @@ static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_ac
 	return status;
 }
 
-static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions) {
+static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions, score_board& sb) {
 	net::other_address client_addr;
 	auto [status, tcp_conn] = tcp_sv.accept_client(client_addr);
 	if (status != net::action_status::OK)
 		return status;
 	// TODO: fork
 	net::stream<net::tcp_source> request = tcp_conn.to_stream();
-	status = actions.execute(request, tcp_conn);
+	status = actions.execute(request, tcp_conn, sb);
 	if (status == net::action_status::UNK_ACTION) {
 		net::out_stream out;
 		out.write("ERR").prime();
@@ -185,7 +194,8 @@ static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_m
 static net::action_status start_new_game(net::stream<net::udp_source>& req,
 										 const net::udp_connection& udp_conn,
 										 const net::other_address& client_addr,
-										 active_games& games) {
+										 active_games& games,
+										 score_board& sb) {
 	net::out_stream out_strm;
 	out_strm.write("RSG");
 	auto [status, fields] = req.read({{4, 6}, {1, 3}});
@@ -232,7 +242,8 @@ static net::action_status start_new_game(net::stream<net::udp_source>& req,
 static net::action_status end_game(net::stream<net::udp_source>& req,
 								   const net::udp_connection& udp_conn,
 								   const net::other_address& client_addr,
-								   active_games& games) {
+								   active_games& games,
+								   score_board& sb) {
 	net::out_stream out_strm;
 	out_strm.write("RQT");
 	auto [status, plid] = req.read(6, 6);
@@ -270,7 +281,8 @@ static net::action_status end_game(net::stream<net::udp_source>& req,
 static net::action_status start_new_game_debug(net::stream<net::udp_source>& req,
 										 const net::udp_connection& udp_conn,
 										 const net::other_address& client_addr,
-										 active_games& games) {
+										 active_games& games,
+										 score_board& sb) {
 	net::out_stream out_strm;
 	out_strm.write("RDB");
 	auto [status, fields] = req.read({{6, 6}, {1, 3}});
@@ -318,7 +330,8 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 static net::action_status do_try(net::stream<net::udp_source>& req,
 										 const net::udp_connection& udp_conn,
 										 const net::other_address& client_addr,
-										 active_games& games) {
+										 active_games& games,
+										 score_board& sb) {
 	net::out_stream out_strm;
 	out_strm.write("RTR");
 	auto res = req.read(6, 6);
@@ -409,13 +422,11 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	out_strm.write(gm->second.last_trial()->nW + '0').prime();
 	std::cout << out_strm.view();
 	auto erase_status = net::action_status::OK;
-	if (play_res == game::result::WON)
+	if (play_res == game::result::WON) {
+		sb.add_game(gm->second);
+		sb.print_sb_test(); // TESTING
 		erase_status = games.erase(gm);
-	// Testing sb
-	// if (gm->second.has_ended() == game::result::WON) {
-	// 	sb.add_game(gm->second);
-	// 	sb.print_sb_test();
-	// }
+	}
 
 	auto send_status = udp_conn.answer(out_strm, client_addr);
 	if (erase_status != net::action_status::OK)
@@ -424,7 +435,7 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 }
 
 static net::action_status show_trials(net::stream<net::tcp_source>& req,
-									  const net::tcp_connection& tcp_conn) {
+									  const net::tcp_connection& tcp_conn, score_board& sb) {
 	auto [status, plid] = req.read(PLID_SIZE, PLID_SIZE);
 	net::out_stream out_strm;
 	out_strm.write("RST");
@@ -482,5 +493,67 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 	out_strm.write(game::get_fname(plid));
 	out_strm.write(std::to_string(sent_file.size())); // TODO: excep?
 	out_strm.write(sent_file).prime();
+	return tcp_conn.answer(out_strm);
+}
+
+static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
+										  const net::tcp_connection& tcp_conn, score_board& sb) {
+	net::out_stream out_strm;
+	out_strm.write("RSS");
+	
+	if (sb.is_empty()) {
+	out_strm.write("EMPTY").prime();
+	std::cout << "Sent: " << out_strm.view() << '\n';
+	return tcp_conn.answer(out_strm);
+	}
+
+	auto filename = "TOPSCORES_XXXXXXX";
+	std::ofstream file(filename, std::ios::out | std::ios::trunc);
+	if (!file.is_open())
+		return net::action_status::PERSIST_ERR;
+	
+	// header
+	file << "-------------------------------- TOP 10 SCORES --------------------------------\n\n";
+	file << std::setw(18) << "SCORE" << std::setw(10) << "PLAYER" << std::setw(10)
+		 << "CODE" << std::setw(12) << "NO TRIALS" << std::setw(10) << "MODE\n\n";
+
+	int rank = 1;
+    for (const auto& g: sb) {
+        file << std::setw(13) << rank << " - "
+             << std::setw(5) << g.score() << "  "    // TODO: test values
+             << std::setw(6) << "123456" << "  "     // TODO: get plid
+             << std::setw(6) << g.secret_key() << "  "
+             << std::setw(10) << g.current_trial() << "  ";
+        std::string mode;
+		if (g.is_debug())
+			mode = "DEBUG";           
+		else
+			mode = "PLAY";
+			 
+		file << std::setw(8) << mode << "\n";
+        rank++;
+        if (rank > MAX_TOP_SCORES) break;
+    }
+
+    file.close();
+
+
+	std::ifstream file_size_stream(filename, std::ios::binary | std::ios::ate);
+    size_t file_size = file_size_stream.tellg();
+
+	if (file_size > 1024) { //TODO: do something here
+        return net::action_status::PERSIST_ERR;
+    }
+
+	out_strm.write(filename).write(std::to_string(file_size));
+	std::ifstream file_content_stream(filename, std::ios::binary);
+    std::string file_content((std::istreambuf_iterator<char> (file_content_stream)),
+							 std::istreambuf_iterator<char>());
+	file_content_stream.close();						  
+
+	out_strm.write(file_content).prime();
+
+    file_size_stream.close();
+		std::cout << "Sent: " << out_strm.view() << '\n';
 	return tcp_conn.answer(out_strm);
 }

@@ -33,6 +33,7 @@ struct game {
 	result has_ended();
 	const char* secret_key() const;
 	char current_trial() const;
+	bool is_debug() const;
 	const trial_record* last_trial() const;
 	char is_duplicate(const char guess[GUESS_SIZE]) const;
 	size_t time_left() const;

@@ -92,6 +92,10 @@ char game::current_trial() const {
 	return _curr_trial;
 }
 
+bool game::is_debug() const { // TOOD: get better method
+	return _debug;
+}
+
 char game::is_duplicate(const char guess[GUESS_SIZE]) const {
 	for (int i = 0; i < MAX_TRIALS - '0'; i++) {
 		int j = 0;
