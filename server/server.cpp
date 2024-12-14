@@ -507,6 +507,7 @@ static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
 	return tcp_conn.answer(out_strm);
 	}
 
+	out_strm.write("OK");
 	auto filename = "TOPSCORES_XXXXXXX";
 	std::ofstream file(filename, std::ios::out | std::ios::trunc);
 	if (!file.is_open())
