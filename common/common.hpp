@@ -59,7 +59,8 @@ enum class action_status {
 	TRY_ENT,
 	TRY_ETM,
 	PERSIST_ERR,
-	FS_ERR
+	FS_ERR,
+	NOT_FOUND
 };
 
 std::string status_to_message(action_status status);

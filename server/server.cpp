@@ -3,10 +3,8 @@
 
 #include <iostream>
 #include <ctime>
-#include <filesystem>
 #include <fcntl.h>
 #include <sys/wait.h>
-#include <fstream>
 
 #define DEFAULT_PORT "58016"
 
@@ -100,7 +98,7 @@ static net::action_status show_trials(
 );*/
 
 int main() {
-	if (game::setup_directories() != 0) {
+	if (setup_directories() != 0) {
 		std::cout << "Failed to setup the " << DEFAULT_GAME_DIR << " directory.\n";
 		std::cout << "Shutting down.\n";
 	}
@@ -122,7 +120,7 @@ int main() {
 	udp_actions.add_action("DBG", start_new_game_debug);
 	udp_actions.add_action("TRY", do_try);
 	tcp_action_map tcp_actions;
-	/*tcp_actions.add_action("STR", show_trials);*/
+	tcp_actions.add_action("STR", show_trials);
 	//tcp_actions.add_action("SSB", show_scoreboard);
 
 	fd_set r_fds;
@@ -207,7 +205,7 @@ static net::action_status start_new_game(net::stream<net::udp_source>& req,
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
-	auto res = game::find_active(fields[0]);
+	auto res = game::find_active(fields[0].c_str());
 	if (res.first != net::action_status::NOT_IN_GAME) {
 		out_strm.write("NOK").prime(); // what to send on server failure?
 		std::cout << out_strm.view();
@@ -217,7 +215,7 @@ static net::action_status start_new_game(net::stream<net::udp_source>& req,
 		return res.first;
 	}
 
-	res = game::create(fields[0], std::stoul(fields[1]));
+	res = game::create(fields[0].c_str(), std::stoul(fields[1]));
 	if (res.first != net::action_status::OK) {
 		out_strm.write("NOK").prime(); // what to send in case of failure?
 		std::cout << out_strm.view();
@@ -243,7 +241,7 @@ static net::action_status end_game(net::stream<net::udp_source>& req,
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
-	auto [gm_status, gm] = game::find_active(plid);
+	auto [gm_status, gm] = game::find_active(plid.c_str());
 	if (gm_status != net::action_status::OK) {
 		out_strm.write("NOK").prime(); // what to send on fs failure?
 		std::cout << out_strm.view();
@@ -308,7 +306,7 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
-	auto res = game::find_active(fields[0]);
+	auto res = game::find_active(fields[0].c_str());
 	if (res.first != net::action_status::NOT_IN_GAME) {
 		out_strm.write("NOK").prime(); // what to send on server failure?
 		std::cout << out_strm.view();
@@ -318,7 +316,7 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 		return res.first;
 	}
 
-	res = game::create(fields[0], std::stoul(fields[1]), secret_key);
+	res = game::create(fields[0].c_str(), std::stoul(fields[1]), secret_key);
 	if (res.first != net::action_status::OK) {
 		out_strm.write("NOK").prime(); // what to send in case of failure?
 		std::cout << out_strm.view();
@@ -368,7 +366,7 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	}
 
 	trial = res.second[0];
-	auto gm = game::find_active(plid);
+	auto gm = game::find_active(plid.c_str());
 	if (gm.first != net::action_status::OK) {
 		out_strm.write("NOK").prime();
 		std::cout << out_strm.view();
@@ -400,7 +398,7 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
-	auto [play_status, play_res] = gm.second.guess(plid, play);
+	auto [play_status, play_res] = gm.second.guess(play);
 	if (play_status != net::action_status::OK) {
 		out_strm.write("INV").prime(); // TODO: unsure if it should return INV in this case
 		std::cout << out_strm.view();
@@ -431,7 +429,7 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	return udp_conn.answer(out_strm, client_addr);
 }
 
-/*static net::action_status show_trials(net::stream<net::tcp_source>& req,
+static net::action_status show_trials(net::stream<net::tcp_source>& req,
 									  const net::tcp_connection& tcp_conn) {
 	auto [status, plid] = req.read(PLID_SIZE, PLID_SIZE);
 	net::out_stream out_strm;
@@ -444,54 +442,43 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		return tcp_conn.answer(out_strm);
 	}
 
-	int game_fd = open(game::get_active_path(plid).c_str(), O_RDONLY);
-	if (game_fd == -1 && errno != ENOENT) {
+	auto [gm_stat, gm] = game::find_any(plid.c_str());
+	if (gm_stat != net::action_status::OK) {
 		out_strm.write("NOK").prime();
 		std::cout << out_strm.view();
-		return tcp_conn.answer(out_strm);
+		if (gm_stat == net::action_status::NOT_IN_GAME)
+			return tcp_conn.answer(out_strm);
+		tcp_conn.answer(out_strm); // TODO: what to send here
+		return gm_stat;
 	}
 
-	if (game_fd != -1) {
+	auto res = gm.has_ended();
+	if (res.first != net::action_status::OK) {
+		out_strm.write("NOK").prime();
+		std::cout << out_strm.view();
+		tcp_conn.answer(out_strm); // TODO: what to send here
+		return res.first;
+	}
+	auto [out_stat, out] = gm.to_string();
+	if (out_stat != net::action_status::OK) {
+		out_strm.write("NOK").prime();
+		std::cout << out_strm.view();
+		tcp_conn.answer(out_strm); // TODO: what to send here
+		return res.first;
+	}
+	if (res.second != game::result::ONGOING)
+		out_strm.write("FIN");
+	else
 		out_strm.write("ACT");
-		net::stream<net::file_source> source{{game_fd}};
-		std::string sent_file = game::prepare_trial_file(source);
-		close(game_fd); // TODO: check if sent_file is good + check if close was sucessful
-		out_strm.write(game::get_fname(plid));
-		out_strm.write(std::to_string(sent_file.size())); // TODO: excp?
-		out_strm.write(sent_file).prime();
-		return tcp_conn.answer(out_strm);
-	}
-
-	std::string path;
-	try {
-		path = game::get_latest_path(plid);
-	} catch (...) { // TODO: finer exceptions
-		out_strm.write("NOK").prime();
-		std::cout << out_strm.view();
-		tcp_conn.answer(out_strm);
-		return net::action_status::PERSIST_ERR;
-	}
-
-	if (path.empty()) {
-		out_strm.write("NOK").prime();
-		std::cout << out_strm.view();
-		return tcp_conn.answer(out_strm);
-	}
-	if ((game_fd = open(path.c_str(), O_RDONLY)) == -1) {
-		out_strm.write("NOK").prime();
-		std::cout << out_strm.view();
-		tcp_conn.answer(out_strm);
-		return net::action_status::PERSIST_ERR;
-	}
-	out_strm.write("FIN");
-	net::stream<net::file_source> source{{game_fd}};
-	std::string sent_file = game::prepare_trial_file(source);
-	close(game_fd); // TODO: check if sent_file is good + check if close was sucessful
-	out_strm.write(game::get_fname(plid));
-	out_strm.write(std::to_string(sent_file.size())); // TODO: excep?
-	out_strm.write(sent_file).prime();
+	out_strm.write("STATE_" + plid + ".txt"); // TODO: maybe move this to game
+	if (out.size() > 1024) // TODO: what here=
+		return net::action_status::ERR;
+	// TODO: check filename at client
+	out_strm.write(std::to_string(out.size()));
+	out_strm.write(out).prime();
+	std::cout << out_strm.view();
 	return tcp_conn.answer(out_strm);
-}*/
+}
 
 /*static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
 										  const net::tcp_connection& tcp_conn, score_board& sb) {

@@ -1,15 +1,21 @@
 #ifndef _SCOREBOARD_HPP_
 #define _SCOREBOARD_HPP_
 
-#include "game.hpp"
-#include <vector>
+/*#include "game.hpp"
+#include <array>
 
 #define MAX_TOP_SCORES 10
 
 struct score_board {
-    void add_game(game& g);
-    void print_sb_test();
-    bool is_empty() const;
+	struct score_record {
+		uint8_t score;
+		uint8_t tries;
+		char mode;
+		std::array<char, PLID_SIZE> plid;
+		std::array<char, GUESS_SIZE> code;
+	};
+
+	void add_game(uint8_t score, const char plid[PLID_SIZE], const char code[GUESS_SIZE], uint8_t tries, char mode);
     auto begin() {return scoreboard.begin(); }
     auto end() {return scoreboard.end(); }
 private:
@@ -26,7 +32,7 @@ private:
     
     size_t find_game_pos(const game& g);
 
-    std::vector<game> scoreboard;
+    std::array<game, MAX_TOP_SCORES> scoreboard;
 };
-
+*/
 #endif

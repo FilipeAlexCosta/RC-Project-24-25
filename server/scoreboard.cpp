@@ -1,7 +1,7 @@
 #include "scoreboard.hpp"
 #include <iostream>
 
-size_t score_board::find_game_pos(const game& g) {
+/*size_t score_board::find_game_pos(const game& g) {
     GameComparator comparator;
 
     size_t low = 0;
@@ -42,4 +42,4 @@ void score_board::print_sb_test() { // testing TO DELETE LATER
 
 bool score_board::is_empty() const {
     return scoreboard.empty();
-}
+}*/

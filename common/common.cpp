@@ -505,6 +505,9 @@ std::string net::status_to_message(action_status status) {
 		case action_status::FS_ERR:
 			res = "Failed to open/close a file";
 			break;
+		case action_status::NOT_FOUND:
+			res = "Did not find requested file";
+			break;
 		default:
 			res = "Unknown error";
 	}

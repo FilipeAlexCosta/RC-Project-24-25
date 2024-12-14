@@ -1,4 +1,5 @@
 app_client
 app_server
 GAMES
+SCORES
 *.txt
