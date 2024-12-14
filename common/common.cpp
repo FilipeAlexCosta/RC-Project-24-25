@@ -218,7 +218,7 @@ stream<tcp_source> tcp_connection::to_stream() const {
 }
 
 action_status tcp_connection::answer(const out_stream& out) const {
-	int done = 0;
+	size_t done = 0;
 	auto view = out.view();
 	while (done < view.size()) {
 		int n = write(_fd, view.data() + done, view.size() - done);
@@ -265,6 +265,11 @@ bool source::found_eom() const {
 
 bool source::finished() const {
 	return _finished;
+}
+
+void source::reset() {
+	_finished = false;
+	_found_eom = false;
 }
 
 file_source::file_source(int fd) : _fd{fd} {}
@@ -495,7 +500,10 @@ std::string net::status_to_message(action_status status) {
 			res = "Could not connect to server (check address and port)";
 			break;
 		case action_status::PERSIST_ERR:
-			res = "Could not write the file to disk";
+			res = "Could not read/write a file";
+			break;
+		case action_status::FS_ERR:
+			res = "Failed to open/close a file";
 			break;
 		default:
 			res = "Unknown error";
@@ -524,14 +532,6 @@ action_status net::is_valid_max_playtime(const field& field) {
 	if (max_playtime < 0 || max_playtime > MAX_PLAYTIME)
 		return net::action_status::BAD_ARG;
 	return net::action_status::OK;
-}
-
-void net::fill_max_playtime(char res[MAX_PLAYTIME_SIZE], const field& max_playtime) {
-	int res_i = MAX_PLAYTIME_SIZE - 1;
-	for (int i = std::size(max_playtime) - 1; i > -1; i--, res_i--)
-		res[res_i] = max_playtime[i];
-	for (; res_i > -1; res_i--)
-		res[res_i] = '0';
 }
 
 action_status net::is_valid_color(const field& field) {

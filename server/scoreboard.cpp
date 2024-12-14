@@ -19,8 +19,8 @@ size_t score_board::find_game_pos(const game& g) {
 }
 
 void score_board::add_game(game& g) {
-    if (g.has_ended() != game::result::WON)
-        return;
+	if (g.score() < MIN_SCORE)
+		return;
     auto pos = find_game_pos(g);
     scoreboard.insert(scoreboard.begin() + pos, g);
 

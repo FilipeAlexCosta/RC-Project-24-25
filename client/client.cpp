@@ -504,7 +504,6 @@ static net::action_status do_scoreboard(net::stream<net::file_source>& msg, net:
 	if (fld.second != "OK")
 		return net::action_status::UNK_STATUS;
 	net::field fname, file;
-	size_t fsize = 0;
 	fld.first = read_file(ans_strm, fname, file);
 	if (fld.first != net::action_status::OK || (fld.first = ans_strm.check_strict_end()) != net::action_status::OK)
 		return fld.first;

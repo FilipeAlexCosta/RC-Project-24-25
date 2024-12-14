@@ -1,5 +1,5 @@
 CC=g++
-FLAGS=-g
+FLAGS=-g -Wextra -Wall
 
 all: app_client app_server
 

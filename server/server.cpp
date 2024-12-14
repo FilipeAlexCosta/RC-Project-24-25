@@ -1,15 +1,18 @@
 #include "game.hpp"
-#include "scoreboard.hpp"
+#include "scoreboard.hpp" // TODO: change
 
 #include <iostream>
 #include <ctime>
 #include <filesystem>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <fstream>
 
 #define DEFAULT_PORT "58016"
 
 static bool exit_server = false;
+
+//static ScoreBoard sb; // TODO: change
 
 /* signal(SIGPIPE, SIG_IGN)
  * signal(SIGCHILD, SIG_IGN) ignorar estes 2 sinais
@@ -51,59 +54,50 @@ static bool has_ongoing_game(int plid) { // TODO: incorporate this in template ?
 using udp_action_map = net::action_map<
 	net::udp_source,
 	const net::udp_connection&,
-	const net::other_address&,
-	active_games&,
-	score_board&
+	const net::other_address&
 >;
 
 using tcp_action_map = net::action_map<
 	net::tcp_source,
-	const net::tcp_connection&,
-	score_board&
+	const net::tcp_connection&
 >;
 
-static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions, active_games& games, score_board& sb);
-static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions, score_board& sb);
+static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions);
+static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions);
 
 static net::action_status start_new_game(
 	net::stream<net::udp_source>& req,
 	const net::udp_connection& udp_conn,
-	const net::other_address& client_addr,
-	active_games& games, score_board& sb
+	const net::other_address& client_addr
 );
 
 static net::action_status end_game(
 	net::stream<net::udp_source>& req,
 	const net::udp_connection& udp_conn,
-	const net::other_address& client_addr,
-	active_games& games, score_board& sb
+	const net::other_address& client_addr
 );
 
 static net::action_status start_new_game_debug(
 	net::stream<net::udp_source>& req,
 	const net::udp_connection& udp_conn,
-	const net::other_address& client_addr,
-	active_games& games, score_board& sb
+	const net::other_address& client_addr
 );
 
 static net::action_status do_try(
 	net::stream<net::udp_source>& req,
 	const net::udp_connection& udp_conn,
-	const net::other_address& client_addr,
-	active_games& games, score_board& sb
+	const net::other_address& client_addr
 );
 
 static net::action_status show_trials(
 	net::stream<net::tcp_source>& req,
-	const net::tcp_connection& tcp_conn,
-	score_board& sb
+	const net::tcp_connection& tcp_conn
 );
 
-static net::action_status show_scoreboard(
+/*static net::action_status show_scoreboard(
 	net::stream<net::tcp_source>& req,
-	const net::tcp_connection& tcp_conn,
-	score_board& sb
-);
+	const net::tcp_connection& tcp_conn, score_board& sb
+);*/
 
 int main() {
 	if (game::setup_directories() != 0) {
@@ -128,11 +122,8 @@ int main() {
 	udp_actions.add_action("DBG", start_new_game_debug);
 	udp_actions.add_action("TRY", do_try);
 	tcp_action_map tcp_actions;
-	tcp_actions.add_action("STR", show_trials);
-	tcp_actions.add_action("SSB", show_scoreboard);
-	
-	active_games games;
-	score_board sb;
+	/*tcp_actions.add_action("STR", show_trials);*/
+	//tcp_actions.add_action("SSB", show_scoreboard);
 
 	fd_set r_fds;
 	int max_fd = udp_conn.get_fildes();
@@ -147,26 +138,26 @@ int main() {
 			std::cout << "Failed to select the udp/tcp connection.\n";
 			return 1;
 		}
-		net::action_status status[2];
+		net::action_status status[2] = {net::action_status::OK, net::action_status::OK};
 		if (FD_ISSET(udp_conn.get_fildes(), &r_fds))
-			status[0] = handle_udp(udp_conn, udp_actions, games, sb);
+			status[0] = handle_udp(udp_conn, udp_actions);
 		if (FD_ISSET(tcp_sv.get_fildes(), &r_fds))
-			status[1] = handle_tcp(tcp_sv, tcp_actions, sb);
+			status[1] = handle_tcp(tcp_sv, tcp_actions);
 		for (auto stat : status)
 			if (stat != net::action_status::OK)
 				std::cerr << net::status_to_message(stat) << '.' << std::endl;
 	}
 	//udp_main(DEFAULT_PORT);
-	//tcp_main(DEFAULT_PORT);
+//	tcp_main(DEFAULT_PORT);
 	return 0;
 }
 
-static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions, active_games& games, score_board& sb) {
+static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions) {
 	net::other_address client_addr;
 	auto [status, request] = udp_conn.listen(client_addr);
 	if (status != net::action_status::OK)
 		return status;
-	status = actions.execute(request, udp_conn, client_addr, games, sb);
+	status = actions.execute(request, udp_conn, client_addr);
 	if (status == net::action_status::UNK_ACTION) {
 		net::out_stream out;
 		out.write("ERR").prime();
@@ -175,14 +166,14 @@ static net::action_status handle_udp(net::udp_connection& udp_conn, const udp_ac
 	return status;
 }
 
-static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions, score_board& sb) {
+static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions) {
 	net::other_address client_addr;
 	auto [status, tcp_conn] = tcp_sv.accept_client(client_addr);
 	if (status != net::action_status::OK)
 		return status;
 	// TODO: fork
 	net::stream<net::tcp_source> request = tcp_conn.to_stream();
-	status = actions.execute(request, tcp_conn, sb);
+	status = actions.execute(request, tcp_conn);
 	if (status == net::action_status::UNK_ACTION) {
 		net::out_stream out;
 		out.write("ERR").prime();
@@ -193,13 +184,11 @@ static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_m
 
 static net::action_status start_new_game(net::stream<net::udp_source>& req,
 										 const net::udp_connection& udp_conn,
-										 const net::other_address& client_addr,
-										 active_games& games,
-										 score_board& sb) {
+										 const net::other_address& client_addr) {
 	net::out_stream out_strm;
 	out_strm.write("RSG");
 	auto [status, fields] = req.read({{4, 6}, {1, 3}});
-	if (status != net::action_status::OK || (status = req.no_more_fields()) != net::action_status::OK) {
+	if (status != net::action_status::OK || (status = req.check_strict_end()) != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		std::cout << out_strm.view();
 		return udp_conn.answer(out_strm, client_addr);
@@ -218,21 +207,22 @@ static net::action_status start_new_game(net::stream<net::udp_source>& req,
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
-	auto gm = games.find(fields[0]);
-	if (gm != std::end(games)) {
-		if (gm->second.has_ended() == game::result::ONGOING) {
-			out_strm.write("NOK").prime();
-			std::cout << out_strm.view();
-			return udp_conn.answer(out_strm, client_addr);	
-		}
-		games.erase(gm);
-	}
-	status = games.emplace(std::move(fields[0]), game{static_cast<uint16_t>(std::stoul(fields[1]))});
-	if (status != net::action_status::OK) {
-		out_strm.write("ERR").prime(); // TODO: what to send in case of sv failure?
+	auto res = game::find_active(fields[0]);
+	if (res.first != net::action_status::NOT_IN_GAME) {
+		out_strm.write("NOK").prime(); // what to send on server failure?
 		std::cout << out_strm.view();
-		udp_conn.answer(out_strm, client_addr);	
-		return status;
+		if (res.first == net::action_status::OK)
+			return udp_conn.answer(out_strm, client_addr);
+		udp_conn.answer(out_strm, client_addr);
+		return res.first;
+	}
+
+	res = game::create(fields[0], std::stoul(fields[1]));
+	if (res.first != net::action_status::OK) {
+		out_strm.write("NOK").prime(); // what to send in case of failure?
+		std::cout << out_strm.view();
+		udp_conn.answer(out_strm, client_addr);
+		return res.first;
 	}
 	out_strm.write("OK").prime();
 	std::cout << out_strm.view();
@@ -241,59 +231,66 @@ static net::action_status start_new_game(net::stream<net::udp_source>& req,
 
 static net::action_status end_game(net::stream<net::udp_source>& req,
 								   const net::udp_connection& udp_conn,
-								   const net::other_address& client_addr,
-								   active_games& games,
-								   score_board& sb) {
+								   const net::other_address& client_addr) {
 	net::out_stream out_strm;
 	out_strm.write("RQT");
 	auto [status, plid] = req.read(6, 6);
 	if (status != net::action_status::OK
-		|| (status = req.no_more_fields()) != net::action_status::OK
+		|| (status = req.check_strict_end()) != net::action_status::OK
 		|| (status = net::is_valid_plid(plid)) != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		std::cout << out_strm.view();
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
-	auto gm = games.find(plid);
-	if (gm == std::end(games)) {
-		out_strm.write("NOK").prime();
+	auto [gm_status, gm] = game::find_active(plid);
+	if (gm_status != net::action_status::OK) {
+		out_strm.write("NOK").prime(); // what to send on fs failure?
 		std::cout << out_strm.view();
-		return udp_conn.answer(out_strm, client_addr);
+		if (gm_status == net::action_status::NOT_IN_GAME)
+			return udp_conn.answer(out_strm, client_addr);
+		udp_conn.answer(out_strm, client_addr);
+		return gm_status;
 	}
-	if (gm->second.has_ended() != game::result::ONGOING) {
-		out_strm.write("NOK").prime();
+	gm_status = gm.quit();
+	if (gm_status != net::action_status::OK) {
+		out_strm.write("NOK").prime(); // what to send in case of sv failure?
 		std::cout << out_strm.view();
-		games.erase(gm);
-		return udp_conn.answer(out_strm, client_addr);
+		udp_conn.answer(out_strm, client_addr);
+		return gm_status;
 	}
-
 	out_strm.write("OK");
 	for (int i = 0; i < GUESS_SIZE; i++)
-		out_strm.write(gm->second.secret_key()[i]);
+		out_strm.write(gm.secret_key()[i]);
 	out_strm.prime();
-	games.erase(gm);
-	// TODO: persist game
 	std::cout << out_strm.view();
 	return udp_conn.answer(out_strm, client_addr);
 }
 
 static net::action_status start_new_game_debug(net::stream<net::udp_source>& req,
 										 const net::udp_connection& udp_conn,
-										 const net::other_address& client_addr,
-										 active_games& games,
-										 score_board& sb) {
+										 const net::other_address& client_addr) {
 	net::out_stream out_strm;
 	out_strm.write("RDB");
-	auto [status, fields] = req.read({{6, 6}, {1, 3}});
-	if (status != net::action_status::OK
-		|| (status = net::is_valid_plid(fields[0])) != net::action_status::OK
-		|| (status = net::is_valid_max_playtime(fields[1])) != net::action_status::OK) {
+	auto [status, fields] = req.read({{4, 6}, {1, 3}});
+	if (status != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		std::cout << out_strm.view();
 		return udp_conn.answer(out_strm, client_addr);
 	}
-
+	status = net::is_valid_plid(fields[0]);
+	if (status != net::action_status::OK) {
+		out_strm.write("ERR").prime();
+		std::cout << out_strm.view();
+		return udp_conn.answer(out_strm, client_addr);
+	}
+	
+	status = net::is_valid_max_playtime(fields[1]);
+	if (status != net::action_status::OK) {
+		out_strm.write("ERR").prime();
+		std::cout << out_strm.view();
+		return udp_conn.answer(out_strm, client_addr);
+	}
 	char secret_key[GUESS_SIZE];
 	for (int i = 0; i< GUESS_SIZE; i++) {
 		auto [stat, col] = req.read(1, 1);
@@ -304,24 +301,30 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 		}
 		secret_key[i] = col[0];
 	}
-	if (status != net::action_status::OK ||
-		(status = req.no_more_fields()) != net::action_status::OK) {
+	if ((status != net::action_status::OK)
+		|| (status = req.check_strict_end()) != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		std::cout << out_strm.view();
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
-	auto gm = games.find(fields[0]);
-	if (gm != std::end(games)) {
-		if (gm->second.has_ended() == game::result::ONGOING) {
-			out_strm.write("NOK").prime();
-			std::cout << out_strm.view();
-			return udp_conn.answer(out_strm, client_addr);	
-		}
-		games.erase(gm);
+	auto res = game::find_active(fields[0]);
+	if (res.first != net::action_status::NOT_IN_GAME) {
+		out_strm.write("NOK").prime(); // what to send on server failure?
+		std::cout << out_strm.view();
+		if (res.first == net::action_status::OK)
+			return udp_conn.answer(out_strm, client_addr);
+		udp_conn.answer(out_strm, client_addr);
+		return res.first;
 	}
 
-	games.emplace(std::move(fields[0]), game{static_cast<uint16_t>(std::stoul(fields[1])), secret_key});
+	res = game::create(fields[0], std::stoul(fields[1]), secret_key);
+	if (res.first != net::action_status::OK) {
+		out_strm.write("NOK").prime(); // what to send in case of failure?
+		std::cout << out_strm.view();
+		udp_conn.answer(out_strm, client_addr);
+		return res.first;
+	}
 	out_strm.write("OK").prime();
 	std::cout << out_strm.view();
 	return udp_conn.answer(out_strm, client_addr);
@@ -329,9 +332,7 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 
 static net::action_status do_try(net::stream<net::udp_source>& req,
 										 const net::udp_connection& udp_conn,
-										 const net::other_address& client_addr,
-										 active_games& games,
-										 score_board& sb) {
+										 const net::other_address& client_addr) {
 	net::out_stream out_strm;
 	out_strm.write("RTR");
 	auto res = req.read(6, 6);
@@ -360,32 +361,36 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	char trial;
 	res = req.read(1, 1);
 	if (res.first != net::action_status::OK
-		|| (res.first = req.no_more_fields()) != net::action_status::OK) {
+		|| (res.first = req.check_strict_end()) != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		std::cout << out_strm.view();
 		return udp_conn.answer(out_strm, client_addr);
 	}
+
 	trial = res.second[0];
-	auto gm = games.find(plid);
-	if (gm == std::end(games)) {
+	auto gm = game::find_active(plid);
+	if (gm.first != net::action_status::OK) {
 		out_strm.write("NOK").prime();
 		std::cout << out_strm.view();
-		return udp_conn.answer(out_strm, client_addr);
+		if (gm.first == net::action_status::NOT_IN_GAME)
+			return udp_conn.answer(out_strm, client_addr);
+		udp_conn.answer(out_strm, client_addr);
+		return gm.first;
 	}
-	char duplicate_at = gm->second.is_duplicate(play);
-	if (trial != gm->second.current_trial() + 1) {
-		if (trial == gm->second.current_trial() && duplicate_at == gm->second.current_trial()) {
+	char duplicate_at = gm.second.is_duplicate(play);
+	if (trial != gm.second.current_trial() + 1) {
+		if (trial == gm.second.current_trial() && duplicate_at == gm.second.current_trial()) {
 			out_strm.write("OK");
-			out_strm.write(gm->second.current_trial());
-			out_strm.write(gm->second.last_trial()->nB + '0');
-			out_strm.write(gm->second.last_trial()->nW + '0').prime();
+			out_strm.write(gm.second.current_trial());
+			out_strm.write(gm.second.last_trial()->nB + '0');
+			out_strm.write(gm.second.last_trial()->nW + '0').prime();
 			std::cout << out_strm.view();
 			return udp_conn.answer(out_strm, client_addr);
 		}
 
 		out_strm.write("INV").prime();
 		std::cout << out_strm.view();
-		games.erase(gm); // TODO: persist game?
+		// TODO: persist game? forcibly remove game?
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
@@ -395,12 +400,10 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		return udp_conn.answer(out_strm, client_addr);
 	}
 
-	std::fstream out{game::get_active_path(plid), std::ios::in | std::ios::app};
-	auto [play_status, play_res] = gm->second.guess(plid, play);
+	auto [play_status, play_res] = gm.second.guess(plid, play);
 	if (play_status != net::action_status::OK) {
 		out_strm.write("INV").prime(); // TODO: unsure if it should return INV in this case
 		std::cout << out_strm.view();
-		games.erase(gm); // TODO: unsure if it's INV
 		udp_conn.answer(out_strm, client_addr);
 		return play_status; // return first error
 	}
@@ -410,37 +413,31 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		else
 			out_strm.write("ENT");
 		for (int i = 0; i < GUESS_SIZE; i++)
-			out_strm.write(gm->second.secret_key()[i]);
+			out_strm.write(gm.second.secret_key()[i]);
 		out_strm.prime();
 		std::cout << out_strm.view();
-		games.erase(gm); // TODO: persist
 		return udp_conn.answer(out_strm, client_addr);
 	}
 	out_strm.write("OK");
-	out_strm.write(gm->second.current_trial());
-	out_strm.write(gm->second.last_trial()->nB + '0');
-	out_strm.write(gm->second.last_trial()->nW + '0').prime();
+	out_strm.write(gm.second.current_trial());
+	out_strm.write(gm.second.last_trial()->nB + '0');
+	out_strm.write(gm.second.last_trial()->nW + '0').prime();
 	std::cout << out_strm.view();
-	auto erase_status = net::action_status::OK;
-	if (play_res == game::result::WON) {
-		sb.add_game(gm->second);
-		sb.print_sb_test(); // TESTING
-		erase_status = games.erase(gm);
-	}
-
-	auto send_status = udp_conn.answer(out_strm, client_addr);
-	if (erase_status != net::action_status::OK)
-		return erase_status;
-	return send_status;
+	// Testing sb
+	// if (gm->second.has_ended() == game::result::WON) {
+	// 	sb.add_game(gm->second);
+	// 	sb.print_sb_test();
+	// }
+	return udp_conn.answer(out_strm, client_addr);
 }
 
-static net::action_status show_trials(net::stream<net::tcp_source>& req,
-									  const net::tcp_connection& tcp_conn, score_board& sb) {
+/*static net::action_status show_trials(net::stream<net::tcp_source>& req,
+									  const net::tcp_connection& tcp_conn) {
 	auto [status, plid] = req.read(PLID_SIZE, PLID_SIZE);
 	net::out_stream out_strm;
 	out_strm.write("RST");
 	if (status != net::action_status::OK ||
-		(status = req.no_more_fields()) != net::action_status::OK ||
+		(status = req.check_strict_end()) != net::action_status::OK ||
 		(status = net::is_valid_plid(plid)) != net::action_status::OK) {
 		out_strm.write("NOK").prime();
 		std::cout << out_strm.view();
@@ -494,9 +491,9 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 	out_strm.write(std::to_string(sent_file.size())); // TODO: excep?
 	out_strm.write(sent_file).prime();
 	return tcp_conn.answer(out_strm);
-}
+}*/
 
-static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
+/*static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
 										  const net::tcp_connection& tcp_conn, score_board& sb) {
 	net::out_stream out_strm;
 	out_strm.write("RSS");
@@ -562,4 +559,4 @@ static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
     file_size_stream.close();
 		std::cout << "Sent: " << out_strm.view() << '\n';
 	return tcp_conn.answer(out_strm);
-}
+}*/

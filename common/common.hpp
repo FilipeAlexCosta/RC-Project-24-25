@@ -58,7 +58,8 @@ enum class action_status {
 	TRY_NOK,
 	TRY_ENT,
 	TRY_ETM,
-	PERSIST_ERR
+	PERSIST_ERR,
+	FS_ERR
 };
 
 std::string status_to_message(action_status status);
@@ -90,6 +91,7 @@ struct other_address {
 struct source {
 	bool found_eom() const;
 	bool finished() const;
+	void reset();
 protected:
 	bool _found_eom = false;
 	bool _finished = false;
@@ -228,6 +230,10 @@ struct stream {
 		return _source.finished();
 	}
 
+	void reset() {
+		_source.reset();
+	}
+
 	action_status check_strict_end() const {
 		if (_source.finished()) {
 			if (_source.found_eom())
@@ -299,8 +305,6 @@ action_status is_valid_plid(const field& field);
 action_status is_valid_max_playtime(const field& field);
 
 action_status is_valid_color(const field& field);
-
-void fill_max_playtime(char res[MAX_PLAYTIME_SIZE], const field& max_playtime);
 
 template<typename SOURCE, typename... ARGS>
 struct action_map {
