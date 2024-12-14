@@ -33,26 +33,25 @@ std::pair<net::action_status, game::result> game::guess(const std::string& valid
 
 std::pair<uint8_t, uint8_t> game::compare(const char guess[GUESS_SIZE]) {
 	uint8_t nB = 0, nW = 0;
+	bool secret_mask[GUESS_SIZE] = {false};
+	bool guess_mask[GUESS_SIZE] = {false};
+
 	for (int real_it = 0; real_it < GUESS_SIZE; real_it++) {
 		if (_secret_key[real_it] == guess[real_it]) {
 			nB++;
-			continue;
+			secret_mask[real_it] = true;
+			guess_mask[real_it] = true;
 		}
-		bool done = false;
-		for (int guess_it = 0; guess_it < real_it; guess_it++) {
-			if (_secret_key[real_it] == guess[guess_it]) {
-				done = true;
-				break;
-			}
-		}
-		if (done) {
-			nW++;
-			continue;
-		}
-		for (int guess_it = real_it + 1; guess_it < GUESS_SIZE; guess_it++) {
-			if (_secret_key[real_it] == guess[guess_it]) {
-				nW++;
-				break;
+	}
+
+	for (int guess_it = 0; guess_it < GUESS_SIZE; guess_it++) {
+		if (!guess_mask[guess_it]) {
+			for (int key_it = 0; key_it < GUESS_SIZE; key_it++) {
+				if (!secret_mask[key_it] && _secret_key[key_it] == guess[guess_it]) {
+					nW++;
+					secret_mask[key_it] = true;
+					break;
+				}
 			}
 		}
 	}
