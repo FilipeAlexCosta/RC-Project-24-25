@@ -508,8 +508,10 @@ static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
 	}
 
 	out_strm.write("OK");
-	auto filename = "TOPSCORES_XXXXXXX";
-	std::ofstream file(filename, std::ios::out | std::ios::trunc);
+	std::string filename = "TOPSCORES_XXXXXXX.txt";
+	std::filesystem::create_directories("sv"); // testing TO DELETE LATER 
+    auto path = "sv/" + filename;
+	std::ofstream file(path, std::ios::out | std::ios::trunc);
 	if (!file.is_open())
 		return net::action_status::PERSIST_ERR;
 	
@@ -519,19 +521,22 @@ static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
 		 << "CODE" << std::setw(12) << "NO TRIALS" << std::setw(10) << "MODE\n\n";
 
 	int rank = 1;
-    for (const auto& g: sb) {
+    for (const auto& g: sb) { // TODO: Needs formating
         file << std::setw(13) << rank << " - "
-             << std::setw(5) << g.score() << "  "    // TODO: test values
-             << std::setw(6) << "123456" << "  "     // TODO: get plid
-             << std::setw(6) << g.secret_key() << "  "
-             << std::setw(10) << g.current_trial() << "  ";
+             << std::setw(6) << g.score() << "  "    // TODO: test values
+             << std::setw(10) << "123456" << "  "     // TODO: get plid
+             << std::setw(10);
+		for (int i = 0; i < GUESS_SIZE; i++)
+			file << g.secret_key()[i];
+        std::cout << "  ";
+        file<< std::setw(12) << g.current_trial() << "  ";
         std::string mode;
 		if (g.is_debug())
 			mode = "DEBUG";           
 		else
 			mode = "PLAY";
 			 
-		file << std::setw(8) << mode << "\n";
+		file << std::setw(10) << mode << "\n";
         rank++;
         if (rank > MAX_TOP_SCORES) break;
     }
@@ -539,7 +544,7 @@ static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
     file.close();
 
 
-	std::ifstream file_size_stream(filename, std::ios::binary | std::ios::ate);
+	std::ifstream file_size_stream(path, std::ios::binary | std::ios::ate);
     size_t file_size = file_size_stream.tellg();
 
 	if (file_size > 1024) { //TODO: do something here
@@ -547,7 +552,7 @@ static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
     }
 
 	out_strm.write(filename).write(std::to_string(file_size));
-	std::ifstream file_content_stream(filename, std::ios::binary);
+	std::ifstream file_content_stream(path, std::ios::binary);
     std::string file_content((std::istreambuf_iterator<char> (file_content_stream)),
 							 std::istreambuf_iterator<char>());
 	file_content_stream.close();						  

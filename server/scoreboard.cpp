@@ -28,7 +28,7 @@ void score_board::add_game(game& g) {
         scoreboard.pop_back();
 }
 
-void score_board::print_sb_test() {
+void score_board::print_sb_test() { // testing TO DELETE LATER
     int rank = 1;
     for (const auto& g : scoreboard) {
         std::cout << rank++ << DEFAULT_SEP << g.current_trial() << DEFAULT_SEP
