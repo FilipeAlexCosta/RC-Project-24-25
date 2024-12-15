@@ -8,6 +8,7 @@
 #define DEFAULT_PORT "58016"
 
 static bool exit_server = false;
+static bool verbose_mode = false;
 
 //static ScoreBoard sb; // TODO: change
 
@@ -73,17 +74,50 @@ static net::action_status show_scoreboard(
 	const net::tcp_connection& tcp_conn
 );
 
-int main() {
+int main(int argc, char** argv) {
+	std::cout << argc - 1 << " cli args.\n";
+	int argi = 1;
+	bool read_gsport = false;
+	bool read_verbose = false;
+	std::string port = DEFAULT_PORT;
+	while (argi <= argc - 1) {
+		std::string_view arg{argv[argi]};
+		if (arg == "-p") {
+			if (read_gsport) {
+				std::cout << "Can only set port once.\n";
+				return 1;
+			}
+			if (argi + 1 == argc) {
+				std::cout << "Please specify the port after -p.\n";
+				return 1;
+			}
+			port = argv[argi + 1];
+			argi += 2;
+			read_gsport = true;
+			continue;
+		}
+		if (arg == "-v") {
+			if (read_verbose) {
+				std::cout << "Duplicated -v.\n";
+				return 1;
+			}
+			verbose_mode = true;
+			continue;
+		}
+		std::cout << "Unknown CLI argument.\n";
+		return 1;
+	}
+
 	if (setup_directories() != 0) {
 		std::cout << "Failed to setup the " << DEFAULT_GAME_DIR << " directory.\n";
 		std::cout << "Shutting down.\n";
 	}
-	net::udp_connection udp_conn{{DEFAULT_PORT, SOCK_DGRAM}};
+	net::udp_connection udp_conn{{port, SOCK_DGRAM}};
 	if (!udp_conn.valid()) {
 		std::cout << "Failed to open udp connection at " << DEFAULT_PORT << ".\n";
 		return 1;
 	}
-	net::tcp_server tcp_sv{{DEFAULT_PORT, SOCK_STREAM}};
+	net::tcp_server tcp_sv{{port, SOCK_STREAM}};
 	if (!tcp_sv.valid()) {
 		std::cout << "Failed to open tcp connection at " << DEFAULT_PORT << ".\n";
 		return 1;
@@ -121,8 +155,6 @@ int main() {
 			if (stat != net::action_status::OK)
 				std::cerr << net::status_to_message(stat) << '.' << std::endl;
 	}
-	//udp_main(DEFAULT_PORT);
-//	tcp_main(DEFAULT_PORT);
 	return 0;
 }
 

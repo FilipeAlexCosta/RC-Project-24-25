@@ -26,6 +26,9 @@
 #define GUESS_SIZE 4
 #define DEFAULT_TIMEOUT 5
 #define DEFAULT_LISTEN_CONNS 5
+#define MAX_FSIZE 1024
+#define MAX_FSIZE_LEN 4
+#define MAX_FNAME_SIZE 24
 
 namespace net {
 static const std::string VALID_COLORS = "RGBYOP";
@@ -279,8 +282,8 @@ private:
 
 struct tcp_connection {
 	tcp_connection();
-	tcp_connection(int fd);
-	tcp_connection(const self_address& self);
+	tcp_connection(int fd, size_t timeout = DEFAULT_TIMEOUT);
+	tcp_connection(const self_address& self, size_t timeout = DEFAULT_TIMEOUT);
 	tcp_connection(const tcp_connection& other) = delete;
 	tcp_connection(tcp_connection&& other);
 	tcp_connection& operator=(const tcp_connection& other) = delete;
@@ -306,6 +309,10 @@ action_status is_valid_plid(const field& field);
 action_status is_valid_max_playtime(const field& field);
 
 action_status is_valid_color(const field& field);
+
+action_status is_valid_fname(const field& field);
+
+bool is_valid_fsize(size_t fsize);
 
 template<typename SOURCE, typename... ARGS>
 struct action_map {

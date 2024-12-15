@@ -26,11 +26,15 @@ int main(int argc, char** argv) {
 	bool read_gsport = false;
 	std::string host = DEFAULT_HOST;
 	std::string port = DEFAULT_PORT;
-	while (argi < argc - 1) {
+	while (argi <= argc - 1) {
 		std::string_view arg{argv[argi]};
 		if (arg == "-n") {
 			if (read_gsip) {
 				std::cout << "Can only set host once." << std::endl;
+				return 1;
+			}
+			if (argi + 1 == argc) {
+				std::cout << "Please specify the host after -n." << std::endl;
 				return 1;
 			}
 			host = argv[argi + 1];
@@ -41,6 +45,10 @@ int main(int argc, char** argv) {
 		if (arg == "-p") {
 			if (read_gsport) {
 				std::cout << "Can only set port once." << std::endl;
+				return 1;
+			}
+			if (argi + 1 == argc) {
+				std::cout << "Please specify the port after -p." << std::endl;
 				return 1;
 			}
 			port = argv[argi + 1];
@@ -385,22 +393,23 @@ static net::action_status do_debug(net::stream<net::file_source>& msg, net::udp_
 }
 
 static net::action_status read_file(net::stream<net::tcp_source>& ans_strm, net::field& name, net::field& file) {
-	auto fld = ans_strm.read(1, 24);
-	if (fld.first != net::action_status::OK)
+	auto fld = ans_strm.read(1, MAX_FNAME_SIZE);
+	if (fld.first != net::action_status::OK
+		|| (fld.first = net::is_valid_fname(fld.second)) != net::action_status::OK)
 		return fld.first;
 	name = std::move(fld.second);
 
-	fld = ans_strm.read(1, 4);
+	fld = ans_strm.read(1, MAX_FSIZE_LEN);
 	if (fld.first != net::action_status::OK)
 		return fld.first;
 	size_t fsize = 0;
 	try {
 		fsize = std::stoul(fld.second.c_str());
-	} catch (std::invalid_argument&) {
-		return net::action_status::BAD_ARG;
-	} catch (std::out_of_range&) {
+	} catch (std::exception&) {
 		return net::action_status::BAD_ARG;
 	}
+	if (!net::is_valid_fsize(fsize))
+		return net::action_status::BAD_ARG;
 
 	fld = ans_strm.read(fsize, fsize, false);
 	if (fld.first != net::action_status::OK)
@@ -412,10 +421,11 @@ static net::action_status read_file(net::stream<net::tcp_source>& ans_strm, net:
 static net::action_status write_file(const std::string& filename, const std::string& file) {
 	std::ofstream stream;
 	stream.open(filename, std::ofstream::out | std::ofstream::trunc);
-	if (!stream.is_open())
-		return net::action_status::PERSIST_ERR;
+	if (!stream)
+		return net::action_status::FS_ERR;
 	stream << file;
-	stream.close();
+	if (!stream)
+		return net::action_status::PERSIST_ERR;
 	return net::action_status::OK;
 }
 

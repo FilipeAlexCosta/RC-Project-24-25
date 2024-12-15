@@ -580,8 +580,6 @@ net::action_status game::terminate(std::ostream& out) {
 	} catch (std::exception& err) {
 		return net::action_status::PERSIST_ERR;
 	}
-	if (_ended != result::WON)
-		return net::action_status::OK;
 	return board.add_record({
 		score(),
 		_plid,

@@ -88,10 +88,13 @@ udp_connection::udp_connection(self_address&& self, size_t timeout) : _self{std:
 		}
 		return;
 	}
+	if (timeout == 0)
+		return;
 	timeval t;
 	t.tv_sec = timeout; // s second timeout
 	t.tv_usec = 0;
-	if (setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1) {
+	if (setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1
+		|| setsockopt(_fd, SOL_SOCKET, SO_SNDTIMEO, &t, sizeof(t)) == -1) {
 		close(_fd);
 		_fd = -1;
 		return;
@@ -166,17 +169,42 @@ int udp_connection::get_fildes() {
 
 tcp_connection::tcp_connection() : _fd{-1} {}
 
-tcp_connection::tcp_connection(int fd) : _fd{fd} {
+tcp_connection::tcp_connection(int fd, size_t timeout) : _fd{fd} {
 	if (fd < 0)
 		_fd = -1;
+	if (timeout == 0)
+		return;
+
+	timeval t;
+	t.tv_sec = timeout; // s second timeout
+	t.tv_usec = 0;
+	if (setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1
+		|| setsockopt(_fd, SOL_SOCKET, SO_SNDTIMEO, &t, sizeof(t)) == -1) {
+		close(_fd);
+		_fd = -1;
+		return;
+	}
 }
 
-tcp_connection::tcp_connection(const self_address& self) {
-	if (!self.valid() || self.socket_type() != SOCK_STREAM)
+tcp_connection::tcp_connection(const self_address& self, size_t timeout) {
+	if (!self.valid() || self.socket_type() != SOCK_STREAM) {
+		_fd = -1;
 		return;
+	}
 	if ((_fd = socket(self.family(), self.socket_type(), 0)) == -1)
 		return;
 	if (!self.is_passive() && connect(_fd, self.unwrap()->ai_addr, self.unwrap()->ai_addrlen) == -1) {
+		close(_fd);
+		_fd = -1;
+		return;
+	}
+	if (timeout == 0)
+		return;
+	timeval t;
+	t.tv_sec = timeout; // s second timeout
+	t.tv_usec = 0;
+	if (setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1
+		|| setsockopt(_fd, SOL_SOCKET, SO_SNDTIMEO, &t, sizeof(t)) == -1) {
 		close(_fd);
 		_fd = -1;
 		return;
@@ -229,9 +257,11 @@ action_status tcp_connection::answer(const out_stream& out) const {
 	return action_status::OK;
 }
 
-tcp_server::tcp_server(const self_address& self, size_t sub_conns) : tcp_connection{self} {
-	if (!self.is_passive())
+tcp_server::tcp_server(const self_address& self, size_t sub_conns) : tcp_connection{self, 0} {
+	if (!self.is_passive()) {
+		_fd = -1;
 		return;
+	}
 	if (bind(_fd, self.unwrap()->ai_addr, self.unwrap()->ai_addrlen) == -1
 		|| listen(_fd, sub_conns) == -1) {
 		close(_fd);
@@ -544,4 +574,19 @@ action_status net::is_valid_color(const field& field) {
 		if (field[0] == col)
 			return action_status::OK;
     return action_status::BAD_ARG;
+}
+
+action_status net::is_valid_fname(const field& field) {
+	if (field.length() >= MAX_FNAME_SIZE || field.length() < 4)
+		return net::action_status::BAD_ARG; // .txt
+	if (field.substr(field.length() - 4) != ".txt")
+		return net::action_status::BAD_ARG;
+	for (auto c : field)
+		if (!std::isalnum(c) && c != '.' && c != '-' && c != '_')
+			return net::action_status::BAD_ARG;
+	return net::action_status::OK;
+}
+
+bool net::is_valid_fsize(size_t fsize) {
+	return fsize <= MAX_FSIZE;
 }
