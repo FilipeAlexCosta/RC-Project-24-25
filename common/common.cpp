@@ -5,6 +5,55 @@
 
 using namespace net;
 
+trace err;
+
+trace::builder::builder(trace& parent, bool is_fatal) : _par{parent},
+	_is_fatal{is_fatal} {}
+
+void trace::builder::operator<<(action_status cause) && {
+	if (cause == action_status::OK)
+		return;
+	auto more = _more.str();
+	if (more.empty())
+		more = status_to_message(cause);
+	_par._trace.push_back(record{cause, std::move(more)});
+	_par._fatal |= static_cast<bool>(_is_fatal);
+}
+
+action_status trace::peek() {
+	if (_trace.empty())
+		return net::action_status::OK;
+	return _trace.back().cause;
+}
+
+bool trace::swallow() {
+	if (_fatal)
+		return false;
+	_trace.clear();
+	return true;
+}
+
+bool trace::dump() {
+	if (_trace.empty())
+		return true;
+	if (_fatal)
+		std::cerr << "[Fatal Error]:";
+	else
+		std::cerr << "[Error]:";
+	for (ssize_t i = _trace.size() - 1; i > -1; i--)
+		std::cerr << "\n | [" << i << "]: " << _trace[i].more;
+	std::cerr << std::endl;
+	if (!_fatal) {
+		_trace.clear();
+		return true;
+	}
+	return false;
+}
+
+trace::builder trace::operator<<(bool is_fatal) {
+	return builder{*this, is_fatal};
+}
+
 self_address::self_address(const std::string_view& other_addr, const std::string_view& other_port, int socktype, int family)
 	: _fam{family}, _sockt{socktype}, _passive{false} {
 	addrinfo hints;

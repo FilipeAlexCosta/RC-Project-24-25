@@ -12,7 +12,7 @@ static bool exit_server = false;
 struct verbose {
 	template<typename... Args>
 	static void write(const net::other_address& client, const std::string_view& resp, Args&&... args) {
-		if (!_mode || sizeof...(Args) == 0)
+		if (!_mode)
 			return;
 		char ip[INET_ADDRSTRLEN];
 		const char* res_ip = inet_ntop(AF_INET, &client.addr.sin_addr, ip, sizeof(ip));
@@ -20,7 +20,8 @@ struct verbose {
 			return; // TODO: print error?
 		int port = ntohs(client.addr.sin_port);
 		std::cout << "[IP: " << res_ip << ", PORT: " << port << "]\n | Request: ";
-		impl_verbose(std::forward<Args>(args)...);
+		if (sizeof...(Args) != 0)
+			impl_verbose(std::forward<Args>(args)...);
 		std::cout << "\n | Response: " << resp << '\n' << std::endl;
 	}
 

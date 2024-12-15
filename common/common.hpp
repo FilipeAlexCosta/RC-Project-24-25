@@ -14,6 +14,8 @@
 #include <string>
 #include <cstring>
 #include <initializer_list>
+#include <iostream>
+#include <sstream>
 
 #define DEFAULT_SEP ' '
 #define DEFAULT_EOM '\n'
@@ -67,6 +69,38 @@ enum class action_status {
 };
 
 std::string status_to_message(action_status status);
+
+struct trace {
+	struct record {
+		action_status cause;
+		std::string more{};
+	};
+
+	struct builder {
+		builder(trace& parent, bool is_fatal);
+		void operator<<(action_status cause) &&;
+
+		template<typename T>
+		builder&& operator<<(T&& arg) && {
+			_more << std::forward<T>(arg);
+			return std::move(*this);
+		}
+	private:
+		trace& _par;
+		bool _is_fatal;
+		std::stringstream _more{};
+	};
+
+	action_status peek();
+	bool swallow();
+	bool dump();
+	builder operator<<(bool is_fatal);
+private:
+	std::vector<record> _trace{};
+	bool _fatal{false};
+};
+
+extern trace err;
 
 struct self_address {
 	self_address(const std::string_view& other_addr, const std::string_view& other_port, int socktype, int family = AF_INET);
@@ -328,14 +362,14 @@ struct action_map {
 			add_action(name, action);
 	}
 
-	action_status execute(arg_stream& strm, ARGS... args) const {
+	action_status execute(arg_stream& strm, ARGS&&... args) const {
 		auto [status, comm] = strm.read(1, SIZE_MAX);
 		if (status != action_status::OK)
 			return action_status::UNK_ACTION;
 		auto it = _actions.find(comm);
 		if (it == _actions.end())
 			return action_status::UNK_ACTION;
-		return it->second(strm, args...);
+		return it->second(strm, std::forward<ARGS>(args)...);
 	}
 private:
 	std::unordered_map<std::string, action> _actions;
