@@ -75,7 +75,6 @@ static net::action_status show_scoreboard(
 );
 
 int main(int argc, char** argv) {
-	std::cout << argc - 1 << " cli args.\n";
 	int argi = 1;
 	bool read_gsport = false;
 	bool read_verbose = false;
@@ -111,7 +110,18 @@ int main(int argc, char** argv) {
 	if (setup_directories() != 0) {
 		std::cout << "Failed to setup the " << DEFAULT_GAME_DIR << " directory.\n";
 		std::cout << "Shutting down.\n";
+		return 1;
 	}
+
+	if (signal(SIGPIPE, SIG_IGN) != 0) {
+		std::cout << "Failed to ignore SIGPIPE.\n";
+		return 1;
+	}
+	if (signal(SIGCHLD, SIG_IGN) != 0) {
+		std::cout << "Failed to ignore SIGCHDL.\n";
+		return 1;
+	}
+
 	net::udp_connection udp_conn{{port, SOCK_DGRAM}};
 	if (!udp_conn.valid()) {
 		std::cout << "Failed to open udp connection at " << DEFAULT_PORT << ".\n";
@@ -177,15 +187,22 @@ static net::action_status handle_tcp(net::tcp_server& tcp_sv, const tcp_action_m
 	auto [status, tcp_conn] = tcp_sv.accept_client(client_addr);
 	if (status != net::action_status::OK)
 		return status;
+	pid_t pid = fork();
+	if (pid == -1)
+		return net::action_status::ERR;
+	if (pid != 0)
+		return net::action_status::OK;
 	// TODO: fork
 	net::stream<net::tcp_source> request = tcp_conn.to_stream();
 	status = actions.execute(request, tcp_conn);
 	if (status == net::action_status::UNK_ACTION) {
 		net::out_stream out;
 		out.write("ERR").prime();
-		return tcp_conn.answer(out);
+		status = tcp_conn.answer(out);
 	}
-	return status;
+	if (status != net::action_status::OK)
+		exit(EXIT_FAILURE);
+	exit(EXIT_SUCCESS);
 }
 
 static net::action_status start_new_game(net::stream<net::udp_source>& req,
