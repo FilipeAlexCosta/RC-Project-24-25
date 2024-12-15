@@ -29,18 +29,49 @@ size_t scoreboard::find(const record& rec) {
     return low;    
 }
 
-net::action_status scoreboard::add_record(record&& record) {
+bool scoreboard::add_temp_record(record&& record) {
 	size_t at = find(record);
 	if (at > _records.size()) {
 		if (_records.size() == MAX_TOP_SCORES)
-			return net::action_status::OK;
+			return false;
 		_records.push_back(std::move(record));
-		return materialize();
+		return true;
 	}
 	if (_records.size() == MAX_TOP_SCORES)
 		_records.pop_back();
 	_records.insert(std::begin(_records) + at, std::move(record));
-	return materialize();
+	return true;
+}
+
+net::action_status scoreboard::add_record(record&& record) {
+	if (add_temp_record(std::move(record)))
+		return materialize();
+	return net::action_status::OK;
+}
+
+bool scoreboard::empty() const {
+	return _records.empty();
+}
+
+std::pair<net::action_status, std::string> scoreboard::to_string() const {
+	std::stringstream out;
+	if (!out)
+		return {net::action_status::FS_ERR, {}};
+	out << "SCORE\tPLAYER\tCODE\tTRIES\tMODE\n";
+	for (const auto& rec : _records) {
+		out << std::to_string(rec.score) << '\t';
+		out << std::string_view{rec.plid, PLID_SIZE} << '\t';
+		out << std::string_view{rec.code, GUESS_SIZE} << '\t';
+		out << rec.tries << '\t';
+		if (rec.mode == 'P')
+			out << "PLAY";
+		else
+			out << "DEBUG";
+		out << '\n';
+	}
+	if (!out)
+		return {net::action_status::PERSIST_ERR, {}};
+	return {net::action_status::OK, out.str()};
 }
 
 net::action_status scoreboard::materialize() {
@@ -95,8 +126,10 @@ static std::optional<std::string> get_latest_file(const std::string& dirp) {
 
 std::pair<net::action_status, scoreboard> scoreboard::get_latest() {
 	auto fname = get_latest_file(DEFAULT_SCORE_DIR);
-	if (!fname.has_value() || fname.value().empty())
-		return {net::action_status::NOT_FOUND, {}};
+	if (!fname.has_value())
+		return {net::action_status::FS_ERR, {}};
+	if (fname.value().empty())
+		return {net::action_status::OK, {}};
 	int fd = open(fname->c_str(), O_RDONLY);
 	if (fd == -1)
 		return {net::action_status::FS_ERR, {}};
@@ -110,12 +143,12 @@ std::pair<net::action_status, scoreboard> scoreboard::get_latest() {
 			{1, 1}, // tries
 			{1, 1} // mode
 		});
-		if (fields.size() == 0 && stat == net::action_status::MISSING_EOM)
-			break;
+		if (stat == net::action_status::MISSING_EOM)
+			break; // TODO: possible error if wrong read instead of end
 		if (stat != net::action_status::OK)
 			return {stat, {}};
 		try {
-			sb.add_record({
+			sb.add_temp_record({
 				static_cast<uint8_t>(std::stoul(fields[0])),
 				fields[1].c_str(),
 				fields[2].c_str(),
@@ -125,6 +158,7 @@ std::pair<net::action_status, scoreboard> scoreboard::get_latest() {
 		} catch (std::exception& err) {
 			return {net::action_status::BAD_ARG, {}};
 		}
+		in.reset();
 	}
 	return {net::action_status::OK, sb};
 }
@@ -305,7 +339,7 @@ std::pair<net::action_status, std::string> game::to_string() const {
 	if (_curr_trial == '0') {
 		out << "\t--- Game started - no transactions found ---";
 	} else {
-		out << "\t--- Transactions found: 2";
+		out << "\t--- Transactions found: ";
 		out << _curr_trial << " ---";
 	}
 	out << '\n';
@@ -528,10 +562,8 @@ net::action_status game::write_trial(uint8_t trial, std::ostream& out) const {
 }
 
 net::action_status game::terminate(std::ostream& out) {
-	std::cout << "Inside terminate!\n";
 	if (_ended == result::ONGOING)
 		return net::action_status::ONGOING_GAME;
-	std::cout << "Will write inside terminate!\n";
 	out << static_cast<char>(_ended) << DEFAULT_SEP;
 	out << _end << DEFAULT_EOM << std::flush;
 	if (!out)

@@ -1,5 +1,4 @@
 #include "game.hpp"
-#include "scoreboard.hpp" // TODO: change
 
 #include <iostream>
 #include <ctime>
@@ -25,29 +24,6 @@ static bool exit_server = false;
  * 			timeout => Resend message
  * }
  */
-
-/*struct Game { 
-	int player_plid;
-	int playtime;
-	std::string secret_key;
-	std::time_t start_time;
-	int trial_num;
-
-	Game(int plid, int playtime, const std::string key)
-	 : player_plid(plid), playtime(playtime), secret_key(key),  start_time(std::time(nullptr)), trial_num(0) {};
-
-	bool hasEnded() const {
-		auto curr_time = std::time(nullptr);
-		auto played_time = std::difftime(curr_time, start_time);
-		return played_time >= playtime || trial_num > MAX_TRIALS;
-	};
-};
-
-static std::unordered_map<int, Game> ongoing_games;
-
-static bool has_ongoing_game(int plid) { // TODO: incorporate this in template ?
-	return ongoing_games.find(plid) != ongoing_games.end();
-}*/
 
 using udp_action_map = net::action_map<
 	net::udp_source,
@@ -92,10 +68,10 @@ static net::action_status show_trials(
 	const net::tcp_connection& tcp_conn
 );
 
-/*static net::action_status show_scoreboard(
+static net::action_status show_scoreboard(
 	net::stream<net::tcp_source>& req,
-	const net::tcp_connection& tcp_conn, score_board& sb
-);*/
+	const net::tcp_connection& tcp_conn
+);
 
 int main() {
 	if (setup_directories() != 0) {
@@ -121,7 +97,7 @@ int main() {
 	udp_actions.add_action("TRY", do_try);
 	tcp_action_map tcp_actions;
 	tcp_actions.add_action("STR", show_trials);
-	//tcp_actions.add_action("SSB", show_scoreboard);
+	tcp_actions.add_action("SSB", show_scoreboard);
 
 	fd_set r_fds;
 	int max_fd = udp_conn.get_fildes();
@@ -480,70 +456,26 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 	return tcp_conn.answer(out_strm);
 }
 
-/*static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
-										  const net::tcp_connection& tcp_conn, score_board& sb) {
+static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
+										  const net::tcp_connection& tcp_conn) {
+	auto [sb_stat, sb] = scoreboard::get_latest();
+	if (sb_stat != net::action_status::OK)
+		return sb_stat;
 	net::out_stream out_strm;
 	out_strm.write("RSS");
-	
-	if (sb.is_empty()) {
-	out_strm.write("EMPTY").prime();
-	std::cout << "Sent: " << out_strm.view() << '\n';
-	return tcp_conn.answer(out_strm);
+	if (sb.empty()) {
+		out_strm.write("EMPTY").prime();
+		std::cout << out_strm.view();
+		return tcp_conn.answer(out_strm);
 	}
-
+	auto [f_stat, file] = sb.to_string();
+	if (f_stat != net::action_status::OK)
+		return f_stat;
+	if (file.size() > 1024) // TODO: what here?
+		return net::action_status::ERR;
 	out_strm.write("OK");
-	std::string filename = "TOPSCORES_XXXXXXX.txt";
-	std::filesystem::create_directories("sv"); // testing TO DELETE LATER 
-    auto path = "sv/" + filename;
-	std::ofstream file(path, std::ios::out | std::ios::trunc);
-	if (!file.is_open())
-		return net::action_status::PERSIST_ERR;
-	
-	// header
-	file << "-------------------------------- TOP 10 SCORES --------------------------------\n\n";
-	file << std::setw(18) << "SCORE" << std::setw(10) << "PLAYER" << std::setw(10)
-		 << "CODE" << std::setw(12) << "NO TRIALS" << std::setw(10) << "MODE\n\n";
-
-	int rank = 1;
-    for (const auto& g: sb) { // TODO: Needs formating
-        file << std::setw(13) << rank << " - "
-             << std::setw(6) << g.score() << "  "    // TODO: test values
-             << std::setw(10) << "123456" << "  "     // TODO: get plid
-             << std::setw(10);
-		for (int i = 0; i < GUESS_SIZE; i++)
-			file << g.secret_key()[i];
-        std::cout << "  ";
-        file<< std::setw(12) << g.current_trial() << "  ";
-        std::string mode;
-		if (g.is_debug())
-			mode = "DEBUG";           
-		else
-			mode = "PLAY";
-			 
-		file << std::setw(10) << mode << "\n";
-        rank++;
-        if (rank > MAX_TOP_SCORES) break;
-    }
-
-    file.close();
-
-
-	std::ifstream file_size_stream(path, std::ios::binary | std::ios::ate);
-    size_t file_size = file_size_stream.tellg();
-
-	if (file_size > 1024) { //TODO: do something here
-        return net::action_status::PERSIST_ERR;
-    }
-
-	out_strm.write(filename).write(std::to_string(file_size));
-	std::ifstream file_content_stream(path, std::ios::binary);
-    std::string file_content((std::istreambuf_iterator<char> (file_content_stream)),
-							 std::istreambuf_iterator<char>());
-	file_content_stream.close();						  
-
-	out_strm.write(file_content).prime();
-
-    file_size_stream.close();
-		std::cout << "Sent: " << out_strm.view() << '\n';
+	out_strm.write("SCOREBOARD.txt");
+	out_strm.write(std::to_string(file.size()));
+	out_strm.write(file).prime();
 	return tcp_conn.answer(out_strm);
-}*/
+}

@@ -26,10 +26,13 @@ struct scoreboard {
 	};
 
 	net::action_status add_record(record&& record);
+	std::pair<net::action_status, std::string> to_string() const;
+	bool empty() const;
 	static std::string get_dir();
 	static std::pair<net::action_status, scoreboard> get_latest();
 private:
     size_t find(const record& g);
+	bool add_temp_record(record&& record);
 	net::action_status materialize();
 
 	std::string _fname{std::string{DEFAULT_SCORE_DIR} + '/' + std::to_string(static_cast<size_t>(std::time(nullptr)))};
