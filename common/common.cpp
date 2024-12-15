@@ -556,6 +556,9 @@ action_status net::is_valid_plid(const field& field) {
 action_status net::is_valid_max_playtime(const field& field) {
 	if (field.length() > 3) // avoid out_of_range exception
 		return net::action_status::BAD_ARG;
+	for (auto c : field)
+		if (c < '0' || c > '9')
+			return net::action_status::BAD_ARG;
 	int max_playtime = -1;
 	try {
 		max_playtime = std::stoi(std::string(field));
