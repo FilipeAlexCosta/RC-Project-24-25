@@ -37,9 +37,9 @@ bool scoreboard::add_temp_record(record&& record) {
 		_records.push_back(std::move(record));
 		return true;
 	}
+	_records.insert(std::begin(_records) + at, std::move(record));
 	if (_records.size() == MAX_TOP_SCORES)
 		_records.pop_back();
-	_records.insert(std::begin(_records) + at, std::move(record));
 	return true;
 }
 
