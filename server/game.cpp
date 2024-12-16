@@ -31,16 +31,14 @@ size_t scoreboard::find(const record& rec) {
 
 bool scoreboard::add_temp_record(record&& record) {
 	size_t at = find(record);
-	if (at > _records.size()) {
-		if (_records.size() == MAX_TOP_SCORES)
-			return false;
-		_records.push_back(std::move(record));
+	if (at == MAX_TOP_SCORES)
+		return false;
+	else {
+		_records.insert(std::begin(_records) + at, std::move(record));
+		if (_records.size() > MAX_TOP_SCORES)
+			_records.pop_back();
 		return true;
 	}
-	_records.insert(std::begin(_records) + at, std::move(record));
-	if (_records.size() == MAX_TOP_SCORES)
-		_records.pop_back();
-	return true;
 }
 
 net::action_status scoreboard::add_record(record&& record) {
@@ -562,8 +560,8 @@ net::action_status game::write_trial(uint8_t trial, std::ostream& out) const {
 }
 
 net::action_status game::terminate(std::ostream& out) {
-	if (_ended == result::ONGOING)
-		return net::action_status::ONGOING_GAME;
+		if (_ended == result::ONGOING)
+			return net::action_status::ONGOING_GAME;
 	out << static_cast<char>(_ended) << DEFAULT_SEP;
 	out << _end << DEFAULT_EOM << std::flush;
 	if (!out)
