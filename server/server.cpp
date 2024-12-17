@@ -671,6 +671,7 @@ static net::action_status show_scoreboard(net::stream<net::tcp_source>& req,
 	out_strm.write("OK");
 	out_strm.write("SCOREBOARD.txt");
 	out_strm.write(std::to_string(file.size()));
+	out_strm.write(file).prime();
 	verbose::write(client_addr, 
 			"scoreboard sent", "show_scoreboard"
 		);
