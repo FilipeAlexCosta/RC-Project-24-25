@@ -245,7 +245,7 @@ static net::action_status start_new_game(net::stream<net::udp_source>& req,
 		verbose::write(
 			client_addr, "malformed player id",
 			"PLID=", fields[0],
-			", DURATION=", fields[1] // TODO: Does it make sense to send duration here?
+			", DURATION=", fields[1]
 		);
 		return udp_conn.answer(out_strm, client_addr);
 	}
@@ -306,7 +306,7 @@ static net::action_status end_game(net::stream<net::udp_source>& req,
 		|| (status = net::is_valid_plid(plid)) != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		verbose::write(client_addr, 
-			"malformed end game request or malformed player id", // TODO: separate errors here?
+			"malformed end game request or malformed player id",
 			"?"
 		);
 		return udp_conn.answer(out_strm, client_addr);
@@ -319,7 +319,7 @@ static net::action_status end_game(net::stream<net::udp_source>& req,
 			client_addr, "plid didn't have an ongoing game",
 			"PLID=", plid
 		);
-		if (gm_status == net::action_status::NOT_IN_GAME) // What's happening here ?
+		if (gm_status == net::action_status::NOT_IN_GAME)
 			return udp_conn.answer(out_strm, client_addr);
 		udp_conn.answer(out_strm, client_addr);
 		return gm_status;
@@ -328,7 +328,7 @@ static net::action_status end_game(net::stream<net::udp_source>& req,
 	if (gm_status != net::action_status::OK) {
 		out_strm.write("NOK").prime(); // what to send in case of sv failure?
 		verbose::write(
-			client_addr, "failed to end game with the given plid", // TODO: better message?
+			client_addr, "failed to end game with the given plid",
 			"PLID=", plid
 		);
 		udp_conn.answer(out_strm, client_addr);
@@ -362,7 +362,7 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 		verbose::write(
 			client_addr, "malformed player id",
 			"PLID=", fields[0],
-			", DURATION=", fields[1] // TODO: Does it make sense to send duration here?
+			", DURATION=", fields[1]
 		);
 		return udp_conn.answer(out_strm, client_addr);
 	}
@@ -383,18 +383,20 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 		if (stat != net::action_status::OK
 			|| (stat = net::is_valid_color(col)) != net::action_status::OK) {
 			status = stat;
-			// break; // TODO: FIX
+			 break;
 		}
 		secret_key[i] = col[0];
 	}
+	std::string_view key(secret_key, GUESS_SIZE);
 	if ((status != net::action_status::OK)
 		|| (status = req.check_strict_end()) != net::action_status::OK) {
 		out_strm.write("ERR").prime();
+		
 		verbose::write(
 			client_addr, "malformed secret key",
 			"PLID=", fields[0],
 			", DURATION=", fields[1],
-			", SECRET KEY=", secret_key // TODO: FIX
+			", SECRET KEY=", key
 		);
 		return udp_conn.answer(out_strm, client_addr);
 	}
@@ -403,10 +405,10 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 	if (res.first != net::action_status::NOT_IN_GAME) {
 		out_strm.write("NOK").prime(); // what to send on server failure?
 		verbose::write(
-			client_addr, "game already underway", // TODO: better message
+			client_addr, "game already underway",
 			"PLID=", fields[0],
 			", DURATION=", fields[1],
-			", SECRET KEY=", secret_key // TODO: FIX
+			", SECRET KEY=", key
 		);
 		if (res.first == net::action_status::OK)
 			return udp_conn.answer(out_strm, client_addr);
@@ -421,7 +423,7 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 			client_addr, "failed to create game",
 			"PLID=", fields[0],
 			", DURATION=", fields[1],
-			", SECRET KEY=", secret_key // TODO: FIX
+			", SECRET KEY=", key
 		);
 		udp_conn.answer(out_strm, client_addr);
 		return res.first;
@@ -431,7 +433,7 @@ static net::action_status start_new_game_debug(net::stream<net::udp_source>& req
 		client_addr, "created new game",
 		"PLID=", fields[0],
 		", DURATION=", fields[1],
-		", SECRET_KEY=", secret_key // TODO: FIX
+		", SECRET_KEY=", key
 	);
 	return udp_conn.answer(out_strm, client_addr);
 }
@@ -446,7 +448,7 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		|| (res.first = net::is_valid_plid(res.second)) != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		verbose::write(client_addr, 
-			"malformed try request or malformed player id", // TODO: separate errors here?
+			"malformed try request or malformed player id",
 			"?"
 		);
 		return udp_conn.answer(out_strm, client_addr);
@@ -458,15 +460,16 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		res = req.read(1, 1);
 		if (res.first != net::action_status::OK
 			|| (res.first = net::is_valid_color(res.second)) != net::action_status::OK)
-			// break; //TODO: FIX
+			break;
 		play[i] = res.second[0];
 	}
+	std::string_view guess(play, GUESS_SIZE);
 	if (res.first != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		verbose::write(client_addr, 
-			"malformed secret key guess", // TODO: separate errors here?
-			", PLID=", res.second,
-			", GUESS=", play // TODO: FIX
+			"malformed secret key guess",
+			", PLID=", plid,
+			", GUESS=", guess
 		);
 		return udp_conn.answer(out_strm, client_addr);
 	}
@@ -477,9 +480,9 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		|| (res.first = req.check_strict_end()) != net::action_status::OK) {
 		out_strm.write("ERR").prime();
 		verbose::write(client_addr, 
-			"malformed trial number", // TODO: better message?
-			", PLID=", res.second,
-			", GUESS=", play // TODO: FIX
+			"malformed trial number",
+			", PLID=", plid,
+			", GUESS=", guess
 		);
 		return udp_conn.answer(out_strm, client_addr);
 	}
@@ -490,8 +493,8 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		out_strm.write("NOK").prime();
 		verbose::write(client_addr, 
 			"plid didn't have an ongoing game",
-			", PLID=", res.second,
-			", GUESS=", play, // TODO: FIX
+			", PLID=", plid,
+			", GUESS=", guess,
 			", TRIAL_NUMBER=", trial
 		);
 		if (gm.first == net::action_status::NOT_IN_GAME)
@@ -507,9 +510,9 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 			out_strm.write(gm.second.last_trial()->nB + '0');
 			out_strm.write(gm.second.last_trial()->nW + '0').prime();
 			verbose::write(client_addr, 
-			"resend identified, number of trials not increased", // TODO: better message
-			", PLID=", res.second,
-			", GUESS=", play, // TODO: FIX
+			"resend identified, number of trials not increased",
+			", PLID=", plid,
+			", GUESS=", guess,
 			", TRIAL_NUMBER=", trial
 		);
 			return udp_conn.answer(out_strm, client_addr);
@@ -518,8 +521,8 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		out_strm.write("INV").prime();
 		verbose::write(client_addr, 
 			"invalid trial request",
-			", PLID=", res.second,
-			", GUESS=", play, // TODO: FIX
+			", PLID=", plid,
+			", GUESS=", guess,
 			", TRIAL_NUMBER=", trial
 		);
 		// TODO: persist game? forcibly remove game?
@@ -530,8 +533,8 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 		out_strm.write("DUP").prime();
 		verbose::write(client_addr, 
 			"duplicated secret key guess received",
-			", PLID=", res.second,
-			", GUESS=", play, // TODO: FIX
+			", PLID=", plid,
+			", GUESS=", guess,
 			", TRIAL_NUMBER=", trial
 		);
 		return udp_conn.answer(out_strm, client_addr);
@@ -541,9 +544,9 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	if (play_status != net::action_status::OK) {
 		out_strm.write("INV").prime(); // TODO: unsure if it should return INV in this case
 		verbose::write(client_addr, 
-			"failed to process secret key guess", // TODO: better message ?
-			", PLID=", res.second,
-			", GUESS=", play, // TODO: FIX
+			"failed to process secret key guess",
+			", PLID=", plid,
+			", GUESS=", guess,
 			", TRIAL_NUMBER=", trial
 		);
 		udp_conn.answer(out_strm, client_addr);
@@ -558,9 +561,9 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 			out_strm.write(gm.second.secret_key()[i]);
 		out_strm.prime();
 		verbose::write(client_addr, 
-			"either maximum time achieved or no more trials are available", // TODO: separate messages ? ; better message ?
-			", PLID=", res.second,
-			", GUESS=", play, // TODO: FIX
+			"either maximum time achieved or no more trials are available",
+			", PLID=", plid,
+			", GUESS=", guess,
 			", TRIAL_NUMBER=", trial
 		);
 		return udp_conn.answer(out_strm, client_addr);
@@ -570,9 +573,9 @@ static net::action_status do_try(net::stream<net::udp_source>& req,
 	out_strm.write(gm.second.last_trial()->nB + '0');
 	out_strm.write(gm.second.last_trial()->nW + '0').prime();
 	verbose::write(client_addr, 
-			"try request sucessfully received", // TODO: better message
-			", PLID=", res.second,
-			", GUESS=", play, // TODO: FIX
+			"try request sucessfully received",
+			", PLID=", plid,
+			", GUESS=", guess,
 			", TRIAL_NUMBER=", trial
 		);
 	return udp_conn.answer(out_strm, client_addr);
@@ -589,7 +592,7 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 		(status = net::is_valid_plid(plid)) != net::action_status::OK) {
 		out_strm.write("NOK").prime();
 		verbose::write(client_addr, 
-			"malformed show trials request or player id", // TODO: separate messages ?
+			"malformed show trials request or player id",
 			", PLID=", plid
 		);
 		return tcp_conn.answer(out_strm);
@@ -599,7 +602,7 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 	if (gm_stat != net::action_status::OK) {
 		out_strm.write("NOK").prime();
 		verbose::write(client_addr, 
-			"no games found (active or finished) for this player", // better message ?
+			"no games found (active or finished) for this player",
 			", PLID=", plid
 		);
 		if (gm_stat == net::action_status::NOT_IN_GAME)
@@ -612,7 +615,7 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 	if (res.first != net::action_status::OK) {
 		out_strm.write("NOK").prime();
 		verbose::write(client_addr, 
-			"no games found (active or finished) for this player", // better message ?
+			"no games found (active or finished) for this player", 
 			", PLID=", plid
 		);
 		tcp_conn.answer(out_strm); // TODO: what to send here
@@ -622,7 +625,7 @@ static net::action_status show_trials(net::stream<net::tcp_source>& req,
 	if (out_stat != net::action_status::OK) {
 		out_strm.write("NOK").prime();
 		verbose::write(client_addr, 
-			"no games found (active or finished) for this player", // better message ?
+			"no games found (active or finished) for this player",
 			", PLID=", plid
 		);
 		tcp_conn.answer(out_strm); // TODO: what to send here

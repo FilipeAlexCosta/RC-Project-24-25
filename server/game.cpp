@@ -225,7 +225,7 @@ std::pair<net::action_status, game::result> game::has_ended() {
 		return {net::action_status::OK, _ended};
 	if (_curr_trial > '0' && last_trial()->nB == GUESS_SIZE) {
 		_ended = result::WON;
-	} else if (_curr_trial >= MAX_TRIALS) {
+	} else if (_curr_trial > MAX_TRIALS) {
 		_ended = result::LOST_TRIES;
 	} else if (_start + _duration < std::time(nullptr)) {
 		_ended = result::LOST_TIME;
