@@ -692,7 +692,7 @@ static void show_scoreboard(net::stream<net::tcp_source>& req,
 		out_strm.write("EMPTY").prime();
 		verbose::write(client_addr,
 			"no game was yet won by any player",
-			"SSB"
+			"show_scoreboard"
 		);
 		tcp_conn.answer(out_strm);
 		return;
@@ -701,8 +701,10 @@ static void show_scoreboard(net::stream<net::tcp_source>& req,
 	out_strm.write("OK");
 	out_strm.write("SB_" + sb.start_time() + ".txt");
 	out_strm.write(std::to_string(file.size()));
+	out_strm.write(file).prime();
 	verbose::write(client_addr, 
-		"scoreboard sent", "SSB"
+		"scoreboard sent",
+		"show_scoreboard"
 	);
 	tcp_conn.answer(out_strm);
 }
