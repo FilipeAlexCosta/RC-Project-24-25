@@ -10,6 +10,7 @@
 
 static bool in_game = false;
 static bool exit_app = false;
+static bool is_plid_set = false;
 static char current_plid[PLID_SIZE];
 static char current_trial = '0';
 
@@ -129,6 +130,7 @@ int main(int argc, char** argv) {
 
 static void setup_game_clientside(const net::field& plid) {
 	in_game = true;
+	is_plid_set = true;
 	current_trial = '0';
 	for (int i = 0; i < PLID_SIZE; i++)
 		current_plid[i] = plid[i];
@@ -433,8 +435,8 @@ static void write_file(const std::string& filename, const std::string& file) {
 static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	if (!msg.no_more_fields())
 		throw net::syntax_error{"show_trials does not take arguments"};
-	if (!in_game)
-		throw net::game_error{"No ongoing game"};
+	if (!is_plid_set)
+		throw net::game_error{"No valid player id has been set"};
 		
 	net::out_stream out_strm;
 	out_strm.write("STR").write({current_plid, PLID_SIZE}).prime();
