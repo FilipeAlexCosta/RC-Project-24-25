@@ -7,8 +7,8 @@
 
 static scoreboard board;
 
-scoreboard::record::record(const char id[PLID_SIZE], const char key[GUESS_SIZE],
-						   char ntries) : tries{ntries} {
+scoreboard::record::record(uint8_t scr, const char id[PLID_SIZE],
+	const char key[GUESS_SIZE], char ntries) : tries{ntries}, score{scr} {
 	std::copy(id, id + PLID_SIZE, plid);
 	std::copy(key, key + GUESS_SIZE, code);
 }
@@ -18,7 +18,7 @@ size_t scoreboard::find(const record& rec) {
     size_t high = _records.size();
     while (low < high) { // binary search
         size_t mid = low + (high - low) / 2;
-        if (rec.tries < _records[mid].tries)
+        if (rec.score > _records[mid].score)
             high = mid;
         else
             low = mid + 1;
@@ -50,6 +50,7 @@ bool scoreboard::empty() const {
 std::string scoreboard::to_string() const {
 	std::ostringstream out;
 	for (const record& rec : _records) {
+		out << std::to_string(rec.score) << ' ';
 		out << std::string_view{rec.plid, PLID_SIZE} << ' ';
 		out << std::string_view{rec.code, GUESS_SIZE} << ' ';
 		out << rec.tries << '\n';
@@ -69,6 +70,7 @@ void scoreboard::materialize() {
 	if (!out)
 		throw net::io_error{"Failed to materialize scoreboard"};
 	for (const record& rec : _records) {
+		out << std::to_string(rec.score) << DEFAULT_SEP;
 		out << std::string_view{rec.plid, PLID_SIZE} << DEFAULT_SEP;
 		out << std::string_view{rec.code, GUESS_SIZE} << DEFAULT_SEP;
 		out << rec.tries << DEFAULT_EOM;
@@ -130,12 +132,19 @@ scoreboard scoreboard::get_latest(bool keep_name) {
 	net::stream<net::file_source> in{{fd}};
 	while (true) {
 		net::message fields;
+		uint8_t score = 255;
 		try {
 			fields = in.read({
+				{1, 3}, // score
 				{PLID_SIZE, PLID_SIZE}, // plid
 				{GUESS_SIZE, GUESS_SIZE}, // code
 				{1, 1}, // tries
 			});
+			score = static_cast<uint8_t>(std::stoul(fields[0]));
+		} catch (std::out_of_range& err) {
+			throw net::corruption_error{"Corrupted score in scoreboard file"};
+		} catch (std::invalid_argument& err) {
+			throw net::corruption_error{"Corrupted score in scoreboard file"};
 		} catch (net::missing_eom& err) {
 			break; // reached the end
 		} catch (net::interaction_error& err) {
@@ -143,15 +152,20 @@ scoreboard scoreboard::get_latest(bool keep_name) {
 			throw net::corruption_error{"Corrupted scoreboard file"};
 		}
 		sb.add_temp_record({
-			fields[0].c_str(),
+			score,
 			fields[1].c_str(),
-			fields[2][0],
+			fields[2].c_str(),
+			fields[3][0],
 		});
 		in.reset(); // reset input stream
 	}
 	if (close(fd) == -1)
 		throw net::io_error{"Failed to close scoreboard file"};
 	return sb;
+}
+
+uint8_t game::score() const {
+	return (MAX_TRIALS - _curr_trial + 1) * 100 / (MAX_TRIALS - '0');
 }
 
 game::game(const char valid_plid[PLID_SIZE], uint16_t duration)
@@ -531,5 +545,5 @@ void game::terminate(std::ostream& out) {
 		throw net::io_error{"Failed to write end time"};
 	if (_ended != result::WON)
 		return; // do not add to scoreboard if not a win
-	board.add_record({_plid, _secret_key, _curr_trial});
+	board.add_record({score(), _plid, _secret_key, _curr_trial});
 }

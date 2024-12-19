@@ -23,9 +23,10 @@ struct scoreboard {
 	/// Represents an entry in the scoreboard.
 	struct record {
 		char tries;
+		uint8_t score;
 		char plid[PLID_SIZE];
 		char code[GUESS_SIZE];
-		record(const char id[PLID_SIZE], const char key[GUESS_SIZE], char ntries);
+		record(uint8_t scr, const char id[PLID_SIZE], const char key[GUESS_SIZE], char ntries);
 	};
 
 	/// Adds a record to the scoreboard if it's a new high score;
@@ -121,6 +122,9 @@ struct game {
 
 	/// Returns the time elapsed since the game began.
 	size_t time_elapsed() const;
+
+	/// Returns the score of the game.
+	uint8_t score() const;
 
 	/// Returns the game in a human readable format, ready to be
 	/// sent to the final user.
