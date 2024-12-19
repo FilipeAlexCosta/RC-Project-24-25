@@ -16,7 +16,7 @@ scoreboard::record::record(const char id[PLID_SIZE], const char key[GUESS_SIZE],
 size_t scoreboard::find(const record& rec) {
     size_t low = 0;
     size_t high = _records.size();
-    while (low < high) {
+    while (low < high) { // binary search
         size_t mid = low + (high - low) / 2;
         if (rec.tries < _records[mid].tries)
             high = mid;
@@ -28,7 +28,7 @@ size_t scoreboard::find(const record& rec) {
 
 bool scoreboard::add_temp_record(record&& record) {
 	size_t at = find(record);
-	if (at == MAX_TOP_SCORES)
+	if (at == MAX_TOP_SCORES) // discard
 		return false;
 	else {
 		_records.insert(std::begin(_records) + at, std::move(record));
@@ -40,7 +40,7 @@ bool scoreboard::add_temp_record(record&& record) {
 
 void scoreboard::add_record(record&& record) {
 	if (add_temp_record(std::move(record)))
-		return materialize();
+		return materialize(); // write if record was not discarded
 }
 
 bool scoreboard::empty() const {
@@ -68,7 +68,7 @@ void scoreboard::materialize() {
 	};
 	if (!out)
 		throw net::io_error{"Failed to materialize scoreboard"};
-	for (const auto& rec : _records) {
+	for (const record& rec : _records) {
 		out << std::string_view{rec.plid, PLID_SIZE} << DEFAULT_SEP;
 		out << std::string_view{rec.code, GUESS_SIZE} << DEFAULT_SEP;
 		out << rec.tries << DEFAULT_EOM;
@@ -87,18 +87,22 @@ static std::string get_latest_file(const std::string& dirp) {
 			if (!file.is_regular_file())
 				continue;
 			if (path.empty()) {
-				path = file.path().filename().string();
-				try {
+				path = file.path().filename().string(); // get filename
+				try { // convert filename to a std::time_t
 					path_t = std::time_t(std::stoul(path));
 				} catch (std::invalid_argument& err) {
 					path = "";
-					continue;
+				} catch (std::out_of_range& err) {
+					path = "";
 				}
+				continue;
 			}
 			std::time_t curr_t;
 			try {
 				curr_t = std::time_t(std::stoul(file.path().filename().string()));
 			} catch (std::invalid_argument& err) {
+				continue;
+			} catch (std::out_of_range& err) {
 				continue;
 			}
 			if (std::difftime(curr_t, path_t) > 0.0) {
@@ -107,7 +111,6 @@ static std::string get_latest_file(const std::string& dirp) {
 			}
 		}
 	} catch (std::exception& err) {
-		std::cout << err.what() << std::endl;
 		throw net::io_error{"Failed to get latest file in dir"};
 	}
 	return path;
@@ -116,7 +119,7 @@ static std::string get_latest_file(const std::string& dirp) {
 scoreboard scoreboard::get_latest(bool keep_name) {
 	std::string fname = get_latest_file(DEFAULT_SCORE_DIR);
 	if (fname.empty())
-		return {};
+		return {}; // no files
 	std::string fullpath = DEFAULT_SCORE_DIR + ('/' + fname);
 	int fd = open(fullpath.c_str(), O_RDONLY);
 	if (fd == -1)
@@ -136,6 +139,7 @@ scoreboard scoreboard::get_latest(bool keep_name) {
 		} catch (net::missing_eom& err) {
 			break; // reached the end
 		} catch (net::interaction_error& err) {
+			close(fd);
 			throw net::corruption_error{"Corrupted scoreboard file"};
 		}
 		sb.add_temp_record({
@@ -143,8 +147,10 @@ scoreboard scoreboard::get_latest(bool keep_name) {
 			fields[1].c_str(),
 			fields[2][0],
 		});
-		in.reset();
+		in.reset(); // reset input stream
 	}
+	if (close(fd) == -1)
+		throw net::io_error{"Failed to close scoreboard file"};
 	return sb;
 }
 
@@ -170,7 +176,7 @@ game::result game::guess(char play[GUESS_SIZE]) {
 	auto [nB, nW] = compare(play);
 	_trials[_curr_trial - '0'].nB = nB;
 	_trials[_curr_trial - '0'].nW = nW;
-	_trials[_curr_trial - '0']._when = static_cast<uint16_t>(std::difftime(std::time(nullptr), _start));
+	_trials[_curr_trial - '0'].when = static_cast<uint16_t>(std::difftime(std::time(nullptr), _start));
 	std::fstream out{get_active_path(_plid), std::ios::out | std::ios::app};
 	if (!out)
 		throw net::io_error{"Could not write guess to disk"};
@@ -189,11 +195,11 @@ std::pair<uint8_t, uint8_t> game::compare(const char guess[GUESS_SIZE]) {
 			sec_mask[sec_it] = true;
 			gue_mask[sec_it] = true;
 		}
-	}
+	} // checks each possible nB
 
 	for (int gue_it = 0; gue_it < GUESS_SIZE; gue_it++) {
 		if (gue_mask[gue_it])
-			continue;
+			continue; // if has been matched by another color, ignore
 		for (int sec_it = 0; sec_it < GUESS_SIZE; sec_it++) {
 			if (!sec_mask[sec_it] && _secret_key[sec_it] == guess[gue_it]) {
 				nW++;
@@ -207,7 +213,7 @@ std::pair<uint8_t, uint8_t> game::compare(const char guess[GUESS_SIZE]) {
 
 game::result game::has_ended() {
 	if (_ended != result::ONGOING)
-		return _ended;
+		return _ended; // return early if the game has already ended
 	if (_curr_trial > '0' && last_trial()->nB == GUESS_SIZE) {
 		_ended = result::WON;
 	} else if (_curr_trial >= MAX_TRIALS) {
@@ -216,34 +222,34 @@ game::result game::has_ended() {
 		_ended = result::LOST_TIME;
 	}
 	if (_ended == result::ONGOING)
-		return _ended;
+		return _ended; // if it did not end, return
 	_end = std::time(nullptr);
-	if (_end > _start + _duration)
+	if (_end > _start + _duration) // cap the time
 		_end = _start + _duration;
 	std::fstream out{get_active_path(_plid), std::ios::out | std::ios::app};
 	if (!out) {
 		_ended = result::ONGOING;
 		throw net::io_error{"Could not write game to disk"};
 	}
-	terminate(out);
+	terminate(out); // write game to disk
 	return _ended;
 }
 
 void game::quit() {
 	if (_ended == result::QUIT)
-		return;
+		return; // ignore if already quit
 	if (_ended != result::ONGOING)
 		throw net::game_error{"Tried to quit a finished game"};
 	_ended = result::QUIT;
 	_end = std::time(nullptr);
-	if (_end > _start + _duration)
+	if (_end > _start + _duration) // cap the time just in case
 		_end = _start + _duration;
 	std::fstream out{get_active_path(_plid), std::ios::out | std::ios::app};
 	if (!out) {
 		_ended = result::ONGOING;
-		throw net::io_error{"Couldn not write game to disk"};
+		throw net::io_error{"Could not write game to disk"};
 	}
-	return terminate(out);
+	return terminate(out); // write game to disk
 }
 
 const char* game::secret_key() const {
@@ -272,13 +278,6 @@ const trial_record* game::last_trial() const {
 	return &_trials[_curr_trial - '0' - 1];
 }
 
-size_t game::time_left() const {
-	ssize_t diff = static_cast<ssize_t>(std::difftime(_start + _duration, std::time(nullptr)));
-	if (diff < 0 || _ended != result::ONGOING)
-		return 0;
-	return static_cast<size_t>(diff);
-}
-
 size_t game::time_elapsed() const {
 	if (_ended != result::ONGOING)
 		return std::difftime(_end, _start);
@@ -296,7 +295,7 @@ std::string game::to_string() const {
 		out << static_cast<char>(_trials[i].nB + '0') << ' ';
 		out << static_cast<char>(_trials[i].nW + '0') << '\n';
 	}
-	if (_ended == result::ONGOING) {
+	if (_ended == result::ONGOING) { // write seconds left
 		out << std::to_string(static_cast<size_t>(std::difftime(_end, _start)));
 		out << "s\n";
 	}
@@ -338,7 +337,7 @@ void game::create() {
 		throw net::io_error{"Failed to open game file"};
 	out << std::string_view{_plid, PLID_SIZE} << DEFAULT_SEP << _mode;
 	out << DEFAULT_SEP << std::string_view{_secret_key, GUESS_SIZE} << DEFAULT_SEP << _duration << DEFAULT_SEP;
-	out << _start << DEFAULT_EOM << std::flush;
+	out << _start << DEFAULT_EOM << std::flush; /// write header to disk
 	if (!out)
 		throw net::io_error{"Failed to write header to disk"};
 }
@@ -347,7 +346,7 @@ game game::find_active(const char valid_plid[PLID_SIZE]) {
 	std::string path = get_active_path(valid_plid);
 	int fd = open(path.c_str(), O_RDONLY);
 	if (fd == -1) {
-		if (errno == ENOENT)
+		if (errno == ENOENT) // NO ENTRY errno
 			throw net::game_error{"No active games"};
 		throw net::io_error{"Failed to open game file"};
 	}
@@ -361,7 +360,7 @@ game game::find_active(const char valid_plid[PLID_SIZE]) {
 	}
 	if (close(fd) == -1)
 		throw net::io_error{"Failed to close game file"};
-	res.has_ended();
+	res.has_ended(); // may end the game
 	return res;
 }
 
@@ -369,7 +368,7 @@ game game::find_any(const char valid_plid[PLID_SIZE]) {
 	game res;
 	try {
 		return find_active(valid_plid);
-	} catch (net::game_error& err) {}
+	} catch (net::game_error& err) {} // continue if no active games
 	auto path = get_final_path(valid_plid);
 	path = path + '/' + get_latest_file(path);
 	if (path.empty())
@@ -429,10 +428,10 @@ game game::parse(net::stream<net::file_source>& in) {
 			throw net::corruption_error{"Corrupted game file"};
 		}
 		if (trial_number[0] < '1' || trial_number[0] > MAX_TRIALS) {
-			finished = true;
+			finished = true; // reached the termination reason
 			break;
 		}
-		if (i == MAX_TRIALS - '0')
+		if (i == MAX_TRIALS - '0') // too many trials in file
 			throw net::corruption_error{"Corrupted game file"};
 		try {
 			r = in.read({
@@ -448,18 +447,18 @@ game game::parse(net::stream<net::file_source>& in) {
 		gm._trials[i].nB = r[1][0] - '0';
 		gm._trials[i].nW = r[2][0] - '0';
 		try {
-			gm._trials[i]._when = std::stoul(r[3]);
+			gm._trials[i].when = std::stoul(r[3]);
 		} catch (std::invalid_argument& err) {
 			throw net::corruption_error{"Read bad trial time"};
 		} catch (std::out_of_range& err) {
 			throw net::corruption_error{"Read bad trial time"};
 		}
 		gm._curr_trial++;
-		in.reset();
+		in.reset(); // reset stream state
 	}
-	if (!finished)
+	if (!finished) // if the game has not ended
 		return gm;
-	switch (trial_number[0]) {
+	switch (trial_number[0]) { // check termination reason
 	case static_cast<char>(result::LOST_TRIES):
 	case static_cast<char>(result::LOST_TIME):
 	case static_cast<char>(result::WON):
@@ -515,7 +514,7 @@ void game::terminate(std::ostream& out) {
 	if (!out)
 		throw net::io_error{"Failed to write termination reason"};
 	bool failed = false;
-	try {
+	try { // move to final directory
 		std::stringstream path;
 		std::string final_dir = get_final_path(_plid);
 		std::filesystem::create_directory(final_dir);
@@ -531,6 +530,6 @@ void game::terminate(std::ostream& out) {
 	if (failed)
 		throw net::io_error{"Failed to write end time"};
 	if (_ended != result::WON)
-		return;
+		return; // do not add to scoreboard if not a win
 	board.add_record({_plid, _secret_key, _curr_trial});
 }

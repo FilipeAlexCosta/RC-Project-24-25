@@ -259,7 +259,7 @@ static void handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions) {
 	net::stream<net::tcp_source> request = tcp_conn.to_stream();
 	try {
 		actions.execute(request, tcp_conn, client_addr);
-	} catch (net::syntax_error& err) {
+	} catch (net::interaction_error& err) {
 		verbose::write(client_addr, "unknown request", "?");
 		net::out_stream out;
 		out.write("ERR").prime();
