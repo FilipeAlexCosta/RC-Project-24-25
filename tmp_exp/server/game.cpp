@@ -290,57 +290,16 @@ size_t game::time_elapsed() const {
 
 std::string game::to_string() const {
 	std::ostringstream out;
-	if (_ended == result::ONGOING)
-		out << "\tFound an active";
-	else
-		out << "\tLast finalized game";
-	out << " for player " << std::string_view{_plid, PLID_SIZE} << '\n';
-	std::tm* tm = std::gmtime(&_end);
-	out << "Game initiated: " << std::put_time(tm, "%F %T");
-	out << " with " << std::to_string(_duration) << "s to be completed\n";
-	if (_ended != result::ONGOING) {
-		out << "Mode:";
-		if (_mode == 'P')
-			out << " PLAY";
-		else
-			out << " DEBUG";
-		out << " Secret code: " << std::string_view{_secret_key, GUESS_SIZE};
-	}
-	out << '\n';
-	if (_curr_trial == '0') {
-		out << "\t--- Game started - no transactions found ---";
-	} else {
-		out << "\t--- Transactions found: ";
-		out << _curr_trial << " ---";
-	}
-	out << '\n';
 	for (int i = 0; i < _curr_trial - '0'; i++) {
-		out << "Trial: " << std::string_view{_trials[i].trial, GUESS_SIZE};
-		out << ", nB: " << static_cast<char>(_trials[i].nB + '0');
-		out << ", nW: " << static_cast<char>(_trials[i].nW + '0');
-		out << ' ' << std::to_string(_trials[i]._when) << "s\n";
+		for (int j = 0; j < GUESS_SIZE; j++)
+			out << _trials[i].trial[j] << ' ';
+		out << static_cast<char>(_trials[i].nB + '0') << ' ';
+		out << static_cast<char>(_trials[i].nW + '0') << '\n';
 	}
-	switch (_ended) {
-	case result::ONGOING:
-		out << "\t--- " << std::to_string(static_cast<size_t>(time_left()));
-		out << " seconds left --- \n";
-		return out.str();
-	case result::LOST_TIME:
-		out << "\tTermination: TIMEOUT at ";
-		break;
-	case result::LOST_TRIES:
-		out << "\tTermination: FAIL at ";
-		break;
-	case result::WON:
-		out << "\tTermination: WON at ";
-		break;
-	case result::QUIT:
-		out << "\tTermination: QUIT at ";
+	if (_ended == result::ONGOING) {
+		out << std::to_string(static_cast<size_t>(std::difftime(_end, _start)));
+		out << "s\n";
 	}
-	tm = std::gmtime(&_end);
-	out << std::put_time(tm, "%F %T") << ", Duration: ";
-	out << std::to_string(static_cast<size_t>(std::difftime(_end, _start)));
-	out << "s\n";
 	return out.str();
 }
 
@@ -461,7 +420,7 @@ game game::parse(net::stream<net::file_source>& in) {
 	in.reset();
 	bool finished = false;
 	std::string trial_number;
-	for (int i = 0; i < MAX_TRIALS - '0'; i++) {
+	for (int i = 0; i < MAX_TRIALS - '0' + 1; i++) {
 		try {
 			trial_number = in.read(1, 1);
 		} catch (net::missing_eom& err) {
@@ -473,6 +432,8 @@ game game::parse(net::stream<net::file_source>& in) {
 			finished = true;
 			break;
 		}
+		if (i == MAX_TRIALS - '0')
+			throw net::corruption_error{"Corrupted game file"};
 		try {
 			r = in.read({
 				{GUESS_SIZE, GUESS_SIZE}, // GUESS
