@@ -134,6 +134,7 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
+/// Sets up the game client side by storing the PLID and setting the client as in game
 static void setup_game_clientside(const net::field& plid) {
 	in_game = true;
 	is_plid_set = true;
@@ -142,6 +143,7 @@ static void setup_game_clientside(const net::field& plid) {
 		current_plid[i] = plid[i];
 }
 
+/// Implements the 'start' command by asking the game server to start a new game using the UDP protocol
 static void do_start(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto fields = msg.read({{PLID_SIZE, PLID_SIZE}, {1, MAX_PLAYTIME_SIZE}});
 	if (!msg.no_more_fields())
@@ -155,8 +157,6 @@ static void do_start(net::stream<net::file_source>& msg, net::udp_connection& ud
 
 	net::out_stream out_strm;
 	out_strm.write("SNG").write(fields[0]).write_and_fill(fields[1], MAX_PLAYTIME_SIZE, '0').prime();
-	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
-
 	net::other_address other;
 	auto ans_strm = udp.request(out_strm, other);
 	auto res = ans_strm.read(3, 3);
@@ -190,10 +190,12 @@ static void do_start(net::stream<net::file_source>& msg, net::udp_connection& ud
 	throw net::bad_response{"Unknown status"};
 }
 
+/// Implements the 'try' command by sending a guess (C1 C2 C3 C4) to the game server using the UDP protocol
 static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	net::out_stream out_strm;
 	out_strm.write("TRY");
 	out_strm.write({current_plid, PLID_SIZE});
+	
 	net::field res;
 	for (size_t i = 0; i < GUESS_SIZE; i++) {
 		auto res = msg.read(1, 1);
@@ -206,8 +208,6 @@ static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp,
 	if (!in_game)
 		throw net::game_error{"Not in game"};
 	out_strm.write(current_trial + 1).prime();
-
-	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
 	net::other_address other;
 	auto ans_strm = udp.request(out_strm, other);
@@ -272,11 +272,11 @@ static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp,
 		info[i] = res[0];
 	}
 	ans_strm.check_strict_end();
-	if (info[2] < '0' || info[1] < '0' || info[0] < '1' || info[0] > '8')
+	if (info[2] < '0' || info[1] < '0' || info[0] < '1' || info[0] > '8') //  1 <= nT <= 8, nB, nW >= 0
 		throw net::bad_response{"Illegal nT/nB/nW"};
 	if (info[1] + info[2] - 2 * '0' > '0' + GUESS_SIZE) // nB + nW <= 4
 		throw net::bad_response{"Illegal nB/nW (nB + nW > 4)"};
-	if (info[1] == '0' + GUESS_SIZE) {
+	if (info[1] == '0' + GUESS_SIZE) { // nB == GUESS_SIZE
 		in_game = false;
 		std::cout << "You won in " << current_trial << " tries!" << std::endl;
 		return;
@@ -286,6 +286,7 @@ static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp,
 	return;
 }
 
+/// Asks the game server to end the game (if there is one under way) using the UDP protocol
 static void end_game(net::udp_connection& udp) {
 	net::out_stream out_strm;
 	out_strm.write("QUT").write({current_plid, PLID_SIZE}).prime();
@@ -335,7 +336,7 @@ static void end_game(net::udp_connection& udp) {
 	return;
 }
 
-
+/// Implements the 'quit' command by asking the game server to terminate the game
 static void do_quit(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	if (!msg.no_more_fields())
 		throw net::syntax_error{"quit takes no arguments"};
@@ -344,6 +345,7 @@ static void do_quit(net::stream<net::file_source>& msg, net::udp_connection& udp
 	end_game(udp);
 }
 
+/// Implements the 'exit' command. The player asks to exit the Player application. If there is a game under way, it will be terminated
 static void do_exit(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	if (!msg.no_more_fields())
 		throw net::syntax_error{"exit takes no arguments"};
@@ -352,6 +354,7 @@ static void do_exit(net::stream<net::file_source>& msg, net::udp_connection& udp
 	exit_app = true;
 }
 
+/// Implements the 'debug' command by asking the game server to start a new game with a given secret key using the UDP protocol
 static void do_debug(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto res = msg.read({{PLID_SIZE, PLID_SIZE}, {1, MAX_PLAYTIME_SIZE}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
 	if (!msg.no_more_fields())
@@ -360,6 +363,7 @@ static void do_debug(net::stream<net::file_source>& msg, net::udp_connection& ud
 		throw net::syntax_error{"Invalid plid"};
 	if (!net::is_valid_max_playtime(res[1]))
 		throw net::syntax_error{"Invalid duration"};
+	
 	net::out_stream out_strm;
 	out_strm.write("DBG");
 	out_strm.write(res[0]);
@@ -374,11 +378,8 @@ static void do_debug(net::stream<net::file_source>& msg, net::udp_connection& ud
 	if (in_game)
 		throw net::game_error{"Ongoing game"};
 
-	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
-
 	net::other_address other;
 	auto ans_strm = udp.request(out_strm, other);
-
 	auto ans_res = ans_strm.read(3, 3);
 	if (ans_res != "RDB") {
 		if (ans_res == "ERR") {
@@ -410,12 +411,14 @@ static void do_debug(net::stream<net::file_source>& msg, net::udp_connection& ud
 	throw net::bad_response{"Unknown status"};
 }
 
+// Read a file name, size and its content
 static void read_file(net::stream<net::tcp_source>& ans_strm, net::field& name, net::field& file) {
 	auto fld = ans_strm.read(1, MAX_FNAME_SIZE);
 	if (!net::is_valid_fname(fld))
 		throw net::bad_response{"Invalid filename"};
 	name = std::move(fld);
 	fld = ans_strm.read(1, MAX_FSIZE_LEN);
+
 	size_t fsize = 0;
 	try {
 		fsize = std::stoul(fld.c_str());
@@ -428,6 +431,7 @@ static void read_file(net::stream<net::tcp_source>& ans_strm, net::field& name, 
 	file = std::move(ans_strm.read(fsize, fsize, false));
 }
 
+// Write a file to the disk
 static void write_file(const std::string& filename, const std::string& file) {
 	std::ofstream stream;
 	stream.open(filename, std::ofstream::out | std::ofstream::trunc);
@@ -438,21 +442,19 @@ static void write_file(const std::string& filename, const std::string& file) {
 		throw net::io_error{"Could not write file"};
 }
 
+// Implements the 'show_trials' command by asking the game server to send a list of previously made trials and the respective results by establishing a TCP session
 static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	if (!msg.no_more_fields())
 		throw net::syntax_error{"show_trials does not take arguments"};
 	if (!is_plid_set)
 		throw net::game_error{"No valid player id has been set"};
-		
 	net::out_stream out_strm;
 	out_strm.write("STR").write({current_plid, PLID_SIZE}).prime();
-	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
 	net::tcp_connection tcp{tcp_addr};
 	if (!tcp.valid())
 		throw net::socket_error{"Could not open tcp socket"};
 	auto ans_strm = tcp.request(out_strm);
-
 	auto fld = ans_strm.read(3, 3);
 	if (fld != "RST") {
 		if (fld == "ERR") {
@@ -462,6 +464,7 @@ static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connecti
 		}
 		throw net::bad_response{"Unknown reply"};
 	}
+
 	fld = ans_strm.read(3, 3);
 	if (fld == "NOK") {
 		ans_strm.check_strict_end();
@@ -473,6 +476,7 @@ static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connecti
 		throw net::bad_response{"Unknown status"};
 	if (is_FIN)
 		in_game = false;
+
 	net::field fname, file;
 	read_file(ans_strm, fname, file);
 	ans_strm.check_strict_end();
@@ -481,13 +485,13 @@ static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connecti
 
 }
 
+// Implements the 'scoreboard' command by asking the game server to send the scoreboard by establishing a TCP session
 static void do_scoreboard(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	if (!msg.no_more_fields())
 		throw net::syntax_error{"scoreboard takes no arguments"};
-		
+
 	net::out_stream out_strm;
 	out_strm.write("SSB").prime();
-	std::cout << "Sent buffer: \"" << out_strm.view() << '\"' << std::endl;
 
 	net::tcp_connection tcp{tcp_addr};
 	if (!tcp.valid())
@@ -502,6 +506,7 @@ static void do_scoreboard(net::stream<net::file_source>& msg, net::udp_connectio
 		}
 		throw net::bad_response{"Unknown reply"};
 	}
+
 	fld = ans_strm.read(2, 5);
 	if (fld == "EMPTY") {
 		ans_strm.check_strict_end();
@@ -510,6 +515,7 @@ static void do_scoreboard(net::stream<net::file_source>& msg, net::udp_connectio
 	}
 	if (fld != "OK")
 		throw net::bad_response{"Unknown status"};
+	
 	net::field fname, file;
 	read_file(ans_strm, fname, file);
 	ans_strm.check_strict_end();
