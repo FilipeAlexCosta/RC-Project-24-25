@@ -1,7 +1,5 @@
 #include "common.hpp"
 
-#include <filesystem>
-
 using namespace net;
 
 self_address::self_address(const std::string_view& other_addr, const std::string_view& other_port, int socktype, int family)
@@ -80,7 +78,7 @@ udp_connection::udp_connection(self_address&& self, size_t timeout) : _self{std:
 		return;
 	if ((_fd = socket(_self.family(), _self.socket_type(), 0)) == -1)
 		return;
-	if (_self.is_passive()) {
+	if (_self.is_passive()) { // bind if passive
 		if (bind(_fd, _self.unwrap()->ai_addr, _self.unwrap()->ai_addrlen) == -1) {
 			close(_fd);
 			_fd = -1;
@@ -89,7 +87,7 @@ udp_connection::udp_connection(self_address&& self, size_t timeout) : _self{std:
 	}
 	if (timeout == 0)
 		return;
-	timeval t;
+	timeval t; // set timeout
 	t.tv_sec = timeout; // s second timeout
 	t.tv_usec = 0;
 	if (setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1
@@ -196,7 +194,7 @@ tcp_connection::tcp_connection(const self_address& self, size_t timeout) {
 	}
 	if (timeout == 0)
 		return;
-	timeval t;
+	timeval t; // set timeout
 	t.tv_sec = timeout; // s second timeout
 	t.tv_usec = 0;
 	if (setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1
@@ -320,13 +318,13 @@ void file_source::read_len(std::string& buf, size_t len, size_t& n, bool check_e
 		int res = read(_fd, temp, len);
 		if (res < 0)
 			throw net::io_error{"Failed to read from source"};
-		if (res == 0) {
+		if (res == 0) { // EOF
 			_finished = true;
 			throw missing_eom{};
 		}
 		len -= res;
 		if (check_eom && temp[res - 1] == DEFAULT_EOM) {
-			res--;
+			res--; // don't append EOM
 			len = 0;
 			_finished = true;
 			_found_eom = true;
@@ -366,7 +364,7 @@ void string_source::read_len(std::string& buf, size_t len, size_t& n, bool check
 	n = end - _at;
 	_at = end;
 	if (check_eom && buf.back() == DEFAULT_EOM) {
-		n--;
+		n--; // ignore EOM
 		buf.pop_back();
 		_found_eom = true;
 		_finished = true;
@@ -385,24 +383,18 @@ bool udp_source::is_skippable(char c) const {
 }
 
 out_stream& out_stream::write(const field& f) {
-	if (_primed)
-		_primed = false;
 	_buf.append(std::begin(f), std::end(f));
 	_buf.push_back(DEFAULT_SEP);
 	return *this;
 }
 
 out_stream& out_stream::write(char c) {
-	if (_primed)
-		_primed = false;
 	_buf.push_back(c);
 	_buf.push_back(DEFAULT_SEP);
 	return *this;
 }
 
 out_stream& out_stream::write_and_fill(const field& f, size_t n, char fill) {
-	if (_primed)
-		_primed = false;
 	if (n > f.size())
 		_buf.insert(_buf.size(), n - f.size(), fill);
 	_buf.append(std::begin(f), std::end(f));
@@ -411,8 +403,6 @@ out_stream& out_stream::write_and_fill(const field& f, size_t n, char fill) {
 }
 
 out_stream& out_stream::prime() {
-	if (_primed)
-		return *this;
 	if (!_buf.empty())
 		_buf.back() = DEFAULT_EOM;
 	else
