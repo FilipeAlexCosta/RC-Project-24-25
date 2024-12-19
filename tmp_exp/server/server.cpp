@@ -569,7 +569,7 @@ static void do_try(net::stream<net::udp_source>& req,
 			out_strm.write(gm.secret_key()[i]);
 		out_strm.prime();
 		verbose::write(client_addr, 
-			"either maximum time achieved",
+			"maximum time achieved",
 			"PLID=", plid,
 			", GUESS=", std::string_view{play, GUESS_SIZE},
 			", TRIAL_NUMBER=", trial
@@ -621,19 +621,27 @@ static void do_try(net::stream<net::udp_source>& req,
 
 	game::result play_res = gm.guess(play);
 	if (play_res == game::result::LOST_TIME || play_res == game::result::LOST_TRIES) {
-		if (play_res == game::result::LOST_TIME)
+		if (play_res == game::result::LOST_TIME) {
 			out_strm.write("ETM");
-		else
-			out_strm.write("ENT");
-		for (int i = 0; i < GUESS_SIZE; i++)
-			out_strm.write(gm.secret_key()[i]);
-		out_strm.prime();
-		verbose::write(client_addr, 
-			"either maximum time achieved or no more trials are available",
+			verbose::write(client_addr, 
+			"maximum time achieved",
 			"PLID=", plid,
 			", GUESS=", std::string_view{play, GUESS_SIZE},
 			", TRIAL_NUMBER=", trial
-		);
+			);
+		}
+		else {
+			out_strm.write("ENT");
+			verbose::write(client_addr, 
+			"maximum number of trials (8) achieved",
+			"PLID=", plid,
+			", GUESS=", std::string_view{play, GUESS_SIZE},
+			", TRIAL_NUMBER=", trial
+			);
+		}
+		for (int i = 0; i < GUESS_SIZE; i++)
+			out_strm.write(gm.secret_key()[i]);
+		out_strm.prime();
 		udp_conn.answer(out_strm, client_addr);
 		return;
 	}
