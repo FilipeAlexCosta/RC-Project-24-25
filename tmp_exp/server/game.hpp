@@ -7,22 +7,16 @@
 
 #define DEFAULT_GAME_DIR "GAMES"
 #define DEFAULT_SCORE_DIR "SCORES"
-#define SCORE_TRIAL_WEIGHT 0.5
-#define SCORE_DURATION_WEIGHT 0.5
-#define MAX_SCORE 100
-#define MIN_SCORE 0
 #define MAX_TOP_SCORES 10
 
 int setup();
 
 struct scoreboard {
 	struct record {
-		uint8_t score;
 		char tries;
-		char mode;
 		char plid[PLID_SIZE];
 		char code[GUESS_SIZE];
-		record(uint8_t scr, const char id[PLID_SIZE], const char key[GUESS_SIZE], char ntries, char gmode);
+		record(const char id[PLID_SIZE], const char key[GUESS_SIZE], char ntries);
 	};
 
 	void add_record(record&& record);
@@ -30,7 +24,7 @@ struct scoreboard {
 	bool empty() const;
 	const std::string& start_time() const;
 	static std::string get_dir();
-	static scoreboard get_latest();
+	static scoreboard get_latest(bool keep_name = true);
 private:
     size_t find(const record& g);
 	bool add_temp_record(record&& record);
@@ -67,7 +61,6 @@ struct game {
 	char is_duplicate(const char guess[GUESS_SIZE]) const;
 	size_t time_left() const;
 	size_t time_elapsed() const;
-	uint8_t score() const;
 	std::string to_string() const;
 
 	static game create(const char valid_plid[PLID_SIZE], uint16_t duration);

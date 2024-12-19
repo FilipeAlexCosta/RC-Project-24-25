@@ -7,9 +7,8 @@
 
 static scoreboard board;
 
-scoreboard::record::record(uint8_t scr, const char id[PLID_SIZE],
-	const char key[GUESS_SIZE], char ntries, char gmode)
-	: score{scr}, tries{ntries}, mode{gmode} {
+scoreboard::record::record(const char id[PLID_SIZE], const char key[GUESS_SIZE],
+						   char ntries) : tries{ntries} {
 	std::copy(id, id + PLID_SIZE, plid);
 	std::copy(key, key + GUESS_SIZE, code);
 }
@@ -19,7 +18,7 @@ size_t scoreboard::find(const record& rec) {
     size_t high = _records.size();
     while (low < high) {
         size_t mid = low + (high - low) / 2;
-        if(rec.score > _records[mid].score)
+        if (rec.tries < _records[mid].tries)
             high = mid;
         else
             low = mid + 1;
@@ -50,17 +49,10 @@ bool scoreboard::empty() const {
 
 std::string scoreboard::to_string() const {
 	std::ostringstream out;
-	out << "SCORE\tPLAYER\tCODE\tTRIES\tMODE\n";
-	for (const auto& rec : _records) {
-		out << std::to_string(rec.score) << '\t';
-		out << std::string_view{rec.plid, PLID_SIZE} << '\t';
-		out << std::string_view{rec.code, GUESS_SIZE} << '\t';
-		out << rec.tries << '\t';
-		if (rec.mode == 'P')
-			out << "PLAY";
-		else
-			out << "DEBUG";
-		out << '\n';
+	for (const record& rec : _records) {
+		out << std::string_view{rec.plid, PLID_SIZE} << ' ';
+		out << std::string_view{rec.code, GUESS_SIZE} << ' ';
+		out << rec.tries << '\n';
 	}
 	return out.str();
 }
@@ -71,16 +63,15 @@ const std::string& scoreboard::start_time() const {
 
 void scoreboard::materialize() {
 	std::fstream out{
-		std::string{DEFAULT_SCORE_DIR} + '/' + std::to_string(static_cast<size_t>(std::time(nullptr))),
+		DEFAULT_SCORE_DIR + ('/' + _start),
 		std::ios::out | std::ios::trunc
 	};
 	if (!out)
 		throw net::io_error{"Failed to materialize scoreboard"};
 	for (const auto& rec : _records) {
-		out << std::to_string(rec.score) << DEFAULT_SEP;
 		out << std::string_view{rec.plid, PLID_SIZE} << DEFAULT_SEP;
 		out << std::string_view{rec.code, GUESS_SIZE} << DEFAULT_SEP;
-		out << rec.tries << DEFAULT_SEP << rec.mode << DEFAULT_EOM;
+		out << rec.tries << DEFAULT_EOM;
 	}
 	if (!out)
 		throw net::io_error{"Failed to materialize scoreboard"};
@@ -119,41 +110,38 @@ static std::string get_latest_file(const std::string& dirp) {
 		std::cout << err.what() << std::endl;
 		throw net::io_error{"Failed to get latest file in dir"};
 	}
-	if (path.empty())
-		return "";
-	return dirp + '/' + path;
+	return path;
 }
 
-scoreboard scoreboard::get_latest() {
-	auto fname = get_latest_file(DEFAULT_SCORE_DIR);
+scoreboard scoreboard::get_latest(bool keep_name) {
+	std::string fname = get_latest_file(DEFAULT_SCORE_DIR);
 	if (fname.empty())
 		return {};
-	int fd = open(fname.c_str(), O_RDONLY);
+	std::string fullpath = DEFAULT_SCORE_DIR + ('/' + fname);
+	int fd = open(fullpath.c_str(), O_RDONLY);
 	if (fd == -1)
 		throw net::io_error{"Failed to open latest scoreboard file"};
 	scoreboard sb;
+	if (keep_name)
+		sb._start = std::move(fname);
 	net::stream<net::file_source> in{{fd}};
 	while (true) {
 		net::message fields;
 		try {
 			fields = in.read({
-				{1, 3}, // score
 				{PLID_SIZE, PLID_SIZE}, // plid
 				{GUESS_SIZE, GUESS_SIZE}, // code
 				{1, 1}, // tries
-				{1, 1} // mode
-			}); // TODO: TEST THIS!
+			});
 		} catch (net::missing_eom& err) {
 			break; // reached the end
 		} catch (net::interaction_error& err) {
 			throw net::corruption_error{"Corrupted scoreboard file"};
 		}
 		sb.add_temp_record({
-			static_cast<uint8_t>(std::stoul(fields[0])),
+			fields[0].c_str(),
 			fields[1].c_str(),
-			fields[2].c_str(),
-			fields[3][0],
-			fields[4][0]
+			fields[2][0],
 		});
 		in.reset();
 	}
@@ -300,17 +288,6 @@ size_t game::time_elapsed() const {
 	return diff;
 }
 
-uint8_t game::score() const {
-	if (_ended != result::WON)
-		return 0;
-	size_t dur = std::difftime(_end, _start);
-	float from_tri = (((MAX_TRIALS - '0') - (_curr_trial - '0')) + 1) / static_cast<float>(MAX_TRIALS - '0');
-	float from_dur = (MAX_PLAYTIME - dur) / static_cast<float>(MAX_PLAYTIME);
-	float res = from_tri * SCORE_TRIAL_WEIGHT + from_dur * SCORE_DURATION_WEIGHT;
-	res /= SCORE_TRIAL_WEIGHT + SCORE_DURATION_WEIGHT;
-	return static_cast<uint32_t>(res * (MAX_SCORE - MIN_SCORE) + MIN_SCORE);
-}
-
 std::string game::to_string() const {
 	std::ostringstream out;
 	if (_ended == result::ONGOING)
@@ -434,7 +411,8 @@ game game::find_any(const char valid_plid[PLID_SIZE]) {
 	try {
 		return find_active(valid_plid);
 	} catch (net::game_error& err) {}
-	auto path = get_latest_file(get_final_path(valid_plid));
+	auto path = get_final_path(valid_plid);
+	path = path + '/' + get_latest_file(path);
 	if (path.empty())
 		throw net::game_error{"No recorded games"};
 	int fd = -1;
@@ -550,7 +528,7 @@ int setup() {
 	try {
 		std::filesystem::create_directory(DEFAULT_GAME_DIR);
 		std::filesystem::create_directory(DEFAULT_SCORE_DIR);
-		board = scoreboard::get_latest();
+		board = scoreboard::get_latest(false);
 	} catch (std::exception& err){
 		std::cout << "Setup error: " << err.what() << '\n';
 		return 1;
@@ -593,11 +571,5 @@ void game::terminate(std::ostream& out) {
 		throw net::io_error{"Failed to write end time"};
 	if (_ended != result::WON)
 		return;
-	board.add_record({
-		score(),
-		_plid,
-		_secret_key,
-		_curr_trial,
-		_mode
-	});
+	board.add_record({_plid, _secret_key, _curr_trial});
 }
