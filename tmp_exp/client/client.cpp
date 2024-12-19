@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cstring>
 #include <fstream>
+#include <signal.h>
 
 #define DEFAULT_HOST "localhost"
 #define DEFAULT_PORT "58016"
@@ -62,9 +63,14 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
+	if (signal(SIGPIPE, SIG_IGN) != 0) {
+		std::cout << "Failed to ignore SIGPIPE.\n";
+		return 1;
+	}
+
 	net::udp_connection udp{net::self_address{host, port, SOCK_DGRAM}};
 	if (!udp.valid()) {
-		std::cout << "Failed to open udp connection. Check if the address and port are correct." << std::endl;
+		std::cout << "Failed to open udp connection. Check if the address and port are correct.\n";
 		return 1;
 	}
 	net::self_address tcp_addr{net::self_address{host, port, SOCK_STREAM}};

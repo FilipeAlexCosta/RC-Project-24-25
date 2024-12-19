@@ -246,8 +246,11 @@ void tcp_connection::answer(const out_stream& out) const {
 		int n = write(_fd, view.data() + done, view.size() - done);
 		if (n == 0)
 			throw socket_closed_error{"Socket was closed midway"};
-		if (n < 0)
+		if (n < 0) {
+			if (errno == EPIPE)
+				throw socket_closed_error{"Socket was closed midway"};
 			throw conn_error{"Failed to send tcp data"};
+		}
 		done += n;
 	}
 }
@@ -315,8 +318,8 @@ void file_source::read_len(std::string& buf, size_t len, size_t& n, bool check_e
 	char temp[len];
 	while (len != 0) {
 		int res = read(_fd, temp, len);
-		if (res < 0) // TODO: more accurate error for tcp socket
-			throw std::filesystem::filesystem_error{"Failed to read", std::error_code()};
+		if (res < 0)
+			throw net::io_error{"Failed to read from source"};
 		if (res == 0) {
 			_finished = true;
 			throw missing_eom{};

@@ -90,6 +90,8 @@ static std::string get_latest_file(const std::string& dirp) {
 	std::string path = "";
 	std::time_t path_t;
 	try {
+		if (!std::filesystem::exists(dirp))
+			return "";
 		for (const auto& file : std::filesystem::directory_iterator{dirp}) {
 			if (!file.is_regular_file())
 				continue;
@@ -114,7 +116,8 @@ static std::string get_latest_file(const std::string& dirp) {
 			}
 		}
 	} catch (std::exception& err) {
-		throw net::io_error{"Failed to get latest scoreboard file"};
+		std::cout << err.what() << std::endl;
+		throw net::io_error{"Failed to get latest file in dir"};
 	}
 	if (path.empty())
 		return "";
@@ -219,7 +222,7 @@ game::result game::has_ended() {
 		return _ended;
 	if (_curr_trial > '0' && last_trial()->nB == GUESS_SIZE) {
 		_ended = result::WON;
-	} else if (_curr_trial > MAX_TRIALS) {
+	} else if (_curr_trial >= MAX_TRIALS) {
 		_ended = result::LOST_TRIES;
 	} else if (_start + _duration < std::time(nullptr)) {
 		_ended = result::LOST_TIME;
@@ -422,17 +425,15 @@ game game::find_active(const char valid_plid[PLID_SIZE]) {
 	}
 	if (close(fd) == -1)
 		throw net::io_error{"Failed to close game file"};
-	auto ended = res.has_ended();
-	if (ended == result::ONGOING)
-		return res;
-	throw net::game_error{"No active games"};
+	res.has_ended();
+	return res;
 }
 
 game game::find_any(const char valid_plid[PLID_SIZE]) {
 	game res;
 	try {
-		res = std::move(find_active(valid_plid));
-	} catch (net::game_error& err) {} // if no active games
+		return find_active(valid_plid);
+	} catch (net::game_error& err) {}
 	auto path = get_latest_file(get_final_path(valid_plid));
 	if (path.empty())
 		throw net::game_error{"No recorded games"};

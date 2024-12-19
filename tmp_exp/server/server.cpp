@@ -40,6 +40,12 @@ private:
 	static bool _mode;
 };
 
+
+static void sigint_handler(int signal) {
+	exit_server = true;
+}
+
+
 bool verbose::_mode{false};
 
 using udp_action_map = net::action_map<
@@ -141,6 +147,10 @@ int main(int argc, char** argv) {
 		std::cout << "Failed to ignore SIGCHDL.\n";
 		return 1;
 	}
+	if (signal(SIGINT, sigint_handler)) {
+		std::cout << "Failed to set SIGINT handler.\n";
+		return 1;
+	}
 
 	net::udp_connection udp_conn{{port, SOCK_DGRAM}};
 	if (!udp_conn.valid()) {
@@ -221,7 +231,6 @@ int main(int argc, char** argv) {
 			break;
 		}
 	}
-	std::cout << "Server shutting down...\n";
 	return 0;
 }
 
@@ -246,6 +255,7 @@ static void handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions) {
 		throw net::system_error{"Failed to fork for tcp client"};
 	if (pid != 0)
 		return;
+	exit_server = true;
 	net::stream<net::tcp_source> request = tcp_conn.to_stream();
 	try {
 		actions.execute(request, tcp_conn, client_addr);
@@ -255,10 +265,8 @@ static void handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions) {
 		out.write("ERR").prime();
 		tcp_conn.answer(out);
 	} catch (std::exception&  err) {
-		std::cout << "Child tcp process ended on an exception: " << err.what() << '\n';
-		exit(EXIT_FAILURE);
+		std::cout << "Child tcp process encountered an exception: " << err.what() << '\n';
 	}
-	exit(EXIT_SUCCESS);
 }
 
 static void start_new_game(net::stream<net::udp_source>& req,
@@ -351,6 +359,8 @@ static void end_game(net::stream<net::udp_source>& req,
 	game gm;
 	try {
 		gm = game::find_active(plid.c_str());
+		if (gm.has_ended() != game::result::ONGOING)
+			throw net::game_error{"No active games"};
 	} catch (net::game_error& err) {
 		out_strm.write("NOK").prime();
 		verbose::write(
@@ -552,6 +562,22 @@ static void do_try(net::stream<net::udp_source>& req,
 		udp_conn.answer(out_strm, client_addr);
 		return;
 	}
+
+	if (gm.has_ended() == game::result::LOST_TIME) {
+		out_strm.write("ETM");
+		for (int i = 0; i < GUESS_SIZE; i++)
+			out_strm.write(gm.secret_key()[i]);
+		out_strm.prime();
+		verbose::write(client_addr, 
+			"either maximum time achieved",
+			"PLID=", plid,
+			", GUESS=", std::string_view{play, GUESS_SIZE},
+			", TRIAL_NUMBER=", trial
+		);
+		udp_conn.answer(out_strm, client_addr);
+		return;
+	}
+
 	char duplicate_at = gm.is_duplicate(play);
 	if (trial != gm.current_trial() + 1) {
 		if (trial == gm.current_trial() && duplicate_at == gm.current_trial()) {
@@ -576,7 +602,8 @@ static void do_try(net::stream<net::udp_source>& req,
 			", GUESS=", std::string_view{play, GUESS_SIZE},
 			", TRIAL_NUMBER=", trial
 		);
-		udp_conn.answer(out_strm, client_addr); // TODO: terminate game?
+		gm.quit(); // terminate game
+		udp_conn.answer(out_strm, client_addr);
 		return;
 	}
 
