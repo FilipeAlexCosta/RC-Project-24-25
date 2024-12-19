@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	if (setup_directories() != 0) {
+	if (setup() != 0) {
 		std::cout << "Failed to setup the " << DEFAULT_GAME_DIR << " directory.\n";
 		std::cout << "Shutting down.\n";
 		return 1;

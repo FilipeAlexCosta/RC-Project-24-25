@@ -34,6 +34,7 @@
 namespace net {
 static const std::string VALID_COLORS = "RGBYOP";
 
+/// Encapsulates and address obtained using getaddrinfo
 struct self_address {
 	self_address(const std::string_view& other_addr, const std::string_view& other_port, int socktype, int family = AF_INET);
 	self_address(const std::string_view& other_port, int socktype, int family = AF_INET);

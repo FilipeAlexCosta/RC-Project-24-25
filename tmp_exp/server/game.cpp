@@ -546,11 +546,13 @@ game game::parse(net::stream<net::file_source>& in) {
 	return gm;
 }
 
-int setup_directories() {
+int setup() {
 	try {
 		std::filesystem::create_directory(DEFAULT_GAME_DIR);
 		std::filesystem::create_directory(DEFAULT_SCORE_DIR);
-	} catch (...) {
+		board = scoreboard::get_latest();
+	} catch (std::exception& err){
+		std::cout << "Setup error: " << err.what() << '\n';
 		return 1;
 	}
 	return 0;

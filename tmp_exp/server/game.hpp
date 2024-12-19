@@ -13,7 +13,7 @@
 #define MIN_SCORE 0
 #define MAX_TOP_SCORES 10
 
-int setup_directories();
+int setup();
 
 struct scoreboard {
 	struct record {
