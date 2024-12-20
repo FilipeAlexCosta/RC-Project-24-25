@@ -533,6 +533,7 @@ static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connecti
 		fld = ans_strm.read(3, 3);
 		if (fld == "NOK") {
 			ans_strm.check_strict_end();
+			in_game = false;
 			std::cout << "The specified user has no recorded games (or a problem may have occured)\n";
 			return;
 		}

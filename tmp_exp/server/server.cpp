@@ -157,12 +157,12 @@ int main(int argc, char** argv) {
 
 	net::udp_connection udp_conn{{port, SOCK_DGRAM}};
 	if (!udp_conn.valid()) {
-		std::cout << "Failed to open udp connection at " << DEFAULT_PORT << ".\n";
+		std::cout << "Failed to open udp connection at " << port << ".\n";
 		return 1;
 	}
 	net::tcp_server tcp_sv{{port, SOCK_STREAM}};
 	if (!tcp_sv.valid()) {
-		std::cout << "Failed to open tcp connection at " << DEFAULT_PORT << ".\n";
+		std::cout << "Failed to open tcp connection at " << port << ".\n";
 		return 1;
 	}
 
