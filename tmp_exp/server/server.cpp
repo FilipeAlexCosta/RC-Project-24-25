@@ -466,7 +466,7 @@ static void start_new_game_debug(net::stream<net::udp_source>& req,
 	} catch (net::interaction_error& error) {
 		out_strm.write("ERR").prime();
 		verbose::write(
-			client_addr, "malformed end of request",
+			client_addr, "malformed debug request",
 			"PLID=", fields[0],
 			", DURATION=", fields[1],
 			", CODE=", std::string_view{secret_key, GUESS_SIZE}
@@ -748,7 +748,15 @@ static void show_trials(net::stream<net::tcp_source>& req,
 static void show_scoreboard(net::stream<net::tcp_source>& req,
 							const net::tcp_connection& tcp_conn,
 							const net::other_address& client_addr) {
-	req.check_strict_end();
+	try {
+		req.check_strict_end();
+	} catch (net::interaction_error& err) {
+		verbose::write(client_addr, "unknown request", "?");
+		net::out_stream out;
+		out.write("ERR").prime();
+		tcp_conn.answer(out);
+		return;
+	}
 	scoreboard sb = scoreboard::get_latest();
 	net::out_stream out_strm;
 	out_strm.write("RSS");

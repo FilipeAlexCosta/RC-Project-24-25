@@ -316,6 +316,8 @@ std::string game::to_string() const {
 		out << static_cast<char>(_trials[i].nB + '0') << ' ';
 		out << static_cast<char>(_trials[i].nW + '0') << '\n';
 	}
+	if (_curr_trial == '0')
+		out << "No trials found\n";
 	if (_ended == result::ONGOING) { // write seconds left
 		out << std::to_string(time_left());
 		out << "s\n";
