@@ -292,6 +292,13 @@ const trial_record* game::last_trial() const {
 	return &_trials[_curr_trial - '0' - 1];
 }
 
+size_t game::time_left() const {
+	ssize_t diff = static_cast<ssize_t>(std::difftime(_start + _duration, std::time(nullptr)));
+	if (diff < 0 || _ended != result::ONGOING) // clamp time to positive
+		return 0;
+	return static_cast<size_t>(diff);
+}
+
 size_t game::time_elapsed() const {
 	if (_ended != result::ONGOING)
 		return std::difftime(_end, _start);
@@ -310,7 +317,7 @@ std::string game::to_string() const {
 		out << static_cast<char>(_trials[i].nW + '0') << '\n';
 	}
 	if (_ended == result::ONGOING) { // write seconds left
-		out << std::to_string(static_cast<size_t>(std::difftime(_end, _start)));
+		out << std::to_string(time_left());
 		out << "s\n";
 	}
 	return out.str();

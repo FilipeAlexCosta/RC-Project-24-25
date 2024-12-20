@@ -134,7 +134,8 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
-/// Sets up the game client side by storing the PLID and setting the client as in game
+/// Sets up the game client side by storing the PLID and setting the
+/// client as in game
 static void setup_game_clientside(const net::field& plid) {
 	in_game = true;
 	is_plid_set = true;
@@ -143,7 +144,8 @@ static void setup_game_clientside(const net::field& plid) {
 		current_plid[i] = plid[i];
 }
 
-/// Implements the 'start' command by asking the game server to start a new game using the UDP protocol
+/// Implements the 'start' command by asking the game server to start
+/// a new game using the UDP protocol
 static void do_start(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto fields = msg.read({{PLID_SIZE, PLID_SIZE}, {1, MAX_PLAYTIME_SIZE}});
 	if (!msg.no_more_fields())
@@ -195,7 +197,8 @@ static void do_start(net::stream<net::file_source>& msg, net::udp_connection& ud
 	throw net::bad_response{"Unknown status"};
 }
 
-/// Implements the 'try' command by sending a guess (C1 C2 C3 C4) to the game server using the UDP protocol
+/// Implements the 'try' command by sending a guess (C1 C2 C3 C4) to
+/// the game server using the UDP protocol
 static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	net::out_stream out_strm;
 	out_strm.write("TRY");
@@ -297,9 +300,9 @@ static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp,
 	} catch (net::interaction_error& err) {
 		throw net::bad_response{"Bad server try response"};
 	}
-	if (info[2] < '0' || info[1] < '0' || info[0] < '1' || info[0] > '8') //  1 <= nT <= 8, nB, nW >= 0
-		throw net::bad_response{"Illegal nT/nB/nW"};
-	if (info[1] + info[2] - 2 * '0' > '0' + GUESS_SIZE) // nB + nW <= GUESS_SIZE
+	if (info[2] < '0' || info[1] < '0' || info[0] != current_trial)
+		throw net::bad_response{"Illegal nT/nB/nW"}; //  confirm nT and nB, nW >= 0
+	if (info[1] + info[2] - 2 * '0' > GUESS_SIZE) // assert nB + nW <= GUESS_SIZE
 		throw net::bad_response{"Illegal nB/nW (nB + nW > 4)"};
 	if (info[1] == '0' + GUESS_SIZE) { // nB == GUESS_SIZE
 		in_game = false;
@@ -311,7 +314,8 @@ static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp,
 	return;
 }
 
-/// Asks the game server to end the game (if there is one under way) using the UDP protocol
+/// Asks the game server to end the game (if there is one under way)
+/// using the UDP protocol
 static void end_game(net::udp_connection& udp) {
 	net::out_stream out_strm;
 	out_strm.write("QUT").write({current_plid, PLID_SIZE}).prime();
@@ -383,7 +387,8 @@ static void do_quit(net::stream<net::file_source>& msg, net::udp_connection& udp
 	end_game(udp);
 }
 
-/// Implements the 'exit' command. The player asks to exit the Player application. If there is a game under way, it will be terminated
+/// Implements the 'exit' command. The player asks to exit the Player application.
+/// If there is a game under way, it will be terminated
 static void do_exit(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	if (!msg.no_more_fields())
 		throw net::syntax_error{"exit takes no arguments"};
@@ -392,7 +397,8 @@ static void do_exit(net::stream<net::file_source>& msg, net::udp_connection& udp
 	exit_app = true;
 }
 
-/// Implements the 'debug' command by asking the game server to start a new game with a given secret key using the UDP protocol
+/// Implements the 'debug' command by asking the game server to start
+/// a new game with a given secret key using the UDP protocol
 static void do_debug(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	auto res = msg.read({{PLID_SIZE, PLID_SIZE}, {1, MAX_PLAYTIME_SIZE}, {1, 1}, {1, 1}, {1, 1}, {1, 1}});
 	if (!msg.no_more_fields())
@@ -498,7 +504,8 @@ static void write_file(const std::string& filename, const std::string& file) {
 		throw net::io_error{"Could not write file"};
 }
 
-// Implements the 'show_trials' command by asking the game server to send a list of previously made trials and the respective results by establishing a TCP session
+// Implements the 'show_trials' command by asking the game server to send a list
+// of previously made trials and the respective results by establishing a TCP session
 static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connection& udp, const net::self_address& tcp_addr) {
 	if (!msg.no_more_fields())
 		throw net::syntax_error{"show_trials does not take arguments"};

@@ -22,7 +22,7 @@ struct verbose {
 			return;
 		int port = ntohs(client.addr.sin_port);
 		std::cout << "[IP: " << res_ip << ", PORT: " << port << "]\n | Request: ";
-		if (sizeof...(Args) != 0)
+		if (sizeof...(Args) != 0) // this expands to std::cout << arg1 << arg2 ...;
 			impl_verbose(std::forward<Args>(args)...);
 		std::cout << "\n | Response: " << resp << '\n' << std::endl;
 	}
@@ -41,14 +41,13 @@ private:
 		std::cout << std::forward<Arg>(arg);
 		impl_verbose(std::forward<Args>(args)...);
 	}
+
 	static bool _mode;
 };
-
 
 static void sigint_handler(int signal) {
 	exit_server = true;
 }
-
 
 bool verbose::_mode{false};
 
@@ -238,7 +237,7 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
-/// Handles incoming UDP connectections. It listens for incoming udp requests,
+/// Handles incoming UDP connections. It listens for incoming udp requests,
 /// executes the corresponding actions and communicates the results to the client
 static void handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions) {
 	net::other_address client_addr;
@@ -598,7 +597,7 @@ static void do_try(net::stream<net::udp_source>& req,
 	}
 
 	char duplicate_at = gm.is_duplicate(play);
-	if (trial != gm.current_trial() + 1) { // trial is not the expected
+	if (trial != gm.current_trial() + 1) { // unexpected nT
 		// trial received is a resend 
 		// (nT = expected - 1 & guess repeats the one of the previous message)
 		if (trial == gm.current_trial() && duplicate_at == gm.current_trial()) {

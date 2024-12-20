@@ -123,6 +123,9 @@ struct game {
 	/// Returns the time elapsed since the game began.
 	size_t time_elapsed() const;
 
+	/// Returns the time remaining before the game ends.
+	size_t time_left() const;
+
 	/// Returns the score of the game.
 	uint8_t score() const;
 
