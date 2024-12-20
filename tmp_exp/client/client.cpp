@@ -159,18 +159,23 @@ static void do_start(net::stream<net::file_source>& msg, net::udp_connection& ud
 	out_strm.write("SNG").write(fields[0]).write_and_fill(fields[1], MAX_PLAYTIME_SIZE, '0').prime();
 	net::other_address other;
 	auto ans_strm = udp.request(out_strm, other);
-	auto res = ans_strm.read(3, 3);
-	if (res != "RSG") {
-		if (res == "ERR") {
-			ans_strm.check_strict_end();
-			std::cout << DEFAULT_ERR_MSG << '\n';
-			return;
+	net::field res;
+	try {
+		res = ans_strm.read(3, 3);
+		if (res != "RSG") {
+			if (res == "ERR") {
+				ans_strm.check_strict_end();
+				std::cout << DEFAULT_ERR_MSG << '\n';
+				return;
+			}
+			throw net::bad_response{"Unknown reply"};
 		}
-		throw net::bad_response{"Unknown reply"};
-	}
 
-	res = ans_strm.read(2, 3);
-	ans_strm.check_strict_end();
+		res = ans_strm.read(2, 3);
+		ans_strm.check_strict_end();
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server start response"};
+	}
 
 	if (res == "OK") {
 		setup_game_clientside(fields[0]);
@@ -211,34 +216,42 @@ static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp,
 
 	net::other_address other;
 	auto ans_strm = udp.request(out_strm, other);
-	res = ans_strm.read(3, 3);
-	if (res != "RTR") {
-		if (res == "ERR") {
+	try {
+		res = ans_strm.read(3, 3);
+		if (res != "RTR") {
+			if (res == "ERR") {
+				ans_strm.check_strict_end();
+				std::cout << DEFAULT_ERR_MSG << '\n';
+				return;
+			}
+			throw net::bad_response{"Unknown reply"};
+		}
+
+		res = ans_strm.read(2, 3);
+		if (res == "DUP") {
 			ans_strm.check_strict_end();
-			std::cout << DEFAULT_ERR_MSG << '\n';
+			std::cout << "Duplicated guess (DUP)\n";
 			return;
 		}
-		throw net::bad_response{"Unknown reply"};
-	}
-
-	res = ans_strm.read(2, 3);
-	if (res == "DUP") {
-		std::cout << "Duplicated guess (DUP)\n";
-		return;
-	}
-	if (res == "INV") {
-		in_game = false;
-		std::cout << "Invalid trial (closing down game) (INV)\n";
-		return;
-	}
-	if (res == "NOK") {
-		in_game = false;
-		std::cout << "No ongoing game (NOK)\n";
-		return;
-	}
-	if (res == "ERR") {
-		std::cout << "Server got wrong try syntax (ERR)\n";
-		return;
+		if (res == "INV") {
+			in_game = false;
+			ans_strm.check_strict_end();
+			std::cout << "Invalid trial (closing down game) (INV)\n";
+			return;
+		}
+		if (res == "NOK") {
+			in_game = false;
+			ans_strm.check_strict_end();
+			std::cout << "No ongoing game (NOK)\n";
+			return;
+		}
+		if (res == "ERR") {
+			ans_strm.check_strict_end();
+			std::cout << "Server got wrong try syntax (ERR)\n";
+			return;
+		}
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server try response"};
 	}
 
 	bool is_ENT = res == "ENT";
@@ -246,13 +259,21 @@ static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp,
 		in_game = false;
 		char correct_guess[2 * GUESS_SIZE];
 		for (size_t i = 0; i < 2 * GUESS_SIZE; i += 2) {
-			res = ans_strm.read(1, 1);
+			try {
+				res = ans_strm.read(1, 1);
+			} catch (net::interaction_error& err) {
+				throw net::bad_response{"Bad server try response"};
+			}
 			if (!net::is_valid_color(res))
 				throw net::bad_response{"Invalid color"};
 			correct_guess[i] = res[0];
 			correct_guess[i + 1] = ' ';
 		}
-		ans_strm.check_strict_end();
+		try {
+			ans_strm.check_strict_end();
+		} catch (net::interaction_error& err) {
+			throw net::bad_response{"Bad server response"};
+		}
 		correct_guess[2 * GUESS_SIZE - 1] = '\0';
 		if (is_ENT)
 			std::cout << "You ran out of tries!";
@@ -267,14 +288,18 @@ static void do_try(net::stream<net::file_source>& msg, net::udp_connection& udp,
 
 	current_trial++;
 	char info[3];
-	for (size_t i = 0; i < 3; i++) {
-		res = ans_strm.read(1, 1);
-		info[i] = res[0];
+	try {
+		for (size_t i = 0; i < 3; i++) {
+			res = ans_strm.read(1, 1);
+			info[i] = res[0];
+		}
+		ans_strm.check_strict_end();
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server try response"};
 	}
-	ans_strm.check_strict_end();
 	if (info[2] < '0' || info[1] < '0' || info[0] < '1' || info[0] > '8') //  1 <= nT <= 8, nB, nW >= 0
 		throw net::bad_response{"Illegal nT/nB/nW"};
-	if (info[1] + info[2] - 2 * '0' > '0' + GUESS_SIZE) // nB + nW <= 4
+	if (info[1] + info[2] - 2 * '0' > '0' + GUESS_SIZE) // nB + nW <= GUESS_SIZE
 		throw net::bad_response{"Illegal nB/nW (nB + nW > 4)"};
 	if (info[1] == '0' + GUESS_SIZE) { // nB == GUESS_SIZE
 		in_game = false;
@@ -294,42 +319,55 @@ static void end_game(net::udp_connection& udp) {
 
 	net::other_address other;
 	auto ans_strm = udp.request(out_strm, other);
-	auto res = ans_strm.read(3, 3);
-	if (res != "RQT") {
+	net::field res;
+	try {
+		res = ans_strm.read(3, 3);
+		if (res != "RQT") {
+			if (res == "ERR") {
+				ans_strm.check_strict_end();
+				std::cout << DEFAULT_ERR_MSG << '\n';
+				return;
+			}
+			throw net::bad_response{"Unknown reply"};
+		}
+		
+		res = ans_strm.read(2, 3);
 		if (res == "ERR") {
 			ans_strm.check_strict_end();
-			std::cout << DEFAULT_ERR_MSG << '\n';
+			std::cout << "Quit failed, quitting anyways (ERR)\n";
 			return;
 		}
-		throw net::bad_response{"Unknown reply"};
-	}
-	
-	res = ans_strm.read(2, 3);
-	if (res == "ERR") {
-		ans_strm.check_strict_end();
-		std::cout << "Quit failed, quitting anyways (ERR)\n";
-		return;
-	}
 
-	if (res == "NOK") {
-		ans_strm.check_strict_end();
-		std::cout << "Apparently no ongoing game (NOK)\n";
-		return;
+		if (res == "NOK") {
+			ans_strm.check_strict_end();
+			std::cout << "Apparently no ongoing game (NOK)\n";
+			return;
+		}
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server quit response"};
 	}
 
 	if (res != "OK")
 		throw net::bad_response{"Unknown status"};
 
-	in_game = false; // TODO: should probably quit even in case of error?
+	in_game = false;
 	char correct_guess[2 * GUESS_SIZE];
 	for (size_t i = 0; i < 2 * GUESS_SIZE; i += 2) {
-		res = ans_strm.read(1, 1);
+		try {
+			res = ans_strm.read(1, 1);
+		} catch (net::interaction_error& err) {
+			throw net::bad_response{"Bad server quit response"};
+		}
 		if (!net::is_valid_color(res))
 			throw net::bad_response{"Invalid color"};
 		correct_guess[i] = res[0];
 		correct_guess[i + 1] = ' ';
 	}
-	ans_strm.check_strict_end();
+	try {
+		ans_strm.check_strict_end();
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server quit response"};
+	}
 	correct_guess[2 * GUESS_SIZE - 1] = '\0';
 	std::cout << "You quit the game! The secret key was ";
 	std::cout << correct_guess << '.' << std::endl;
@@ -379,19 +417,24 @@ static void do_debug(net::stream<net::file_source>& msg, net::udp_connection& ud
 		throw net::game_error{"Ongoing game"};
 
 	net::other_address other;
-	auto ans_strm = udp.request(out_strm, other);
-	auto ans_res = ans_strm.read(3, 3);
-	if (ans_res != "RDB") {
-		if (ans_res == "ERR") {
-			ans_strm.check_strict_end();
-			std::cout << DEFAULT_ERR_MSG << '\n';
-			return;
+	net::field ans_res;
+	try {
+		auto ans_strm = udp.request(out_strm, other);
+		ans_res = ans_strm.read(3, 3);
+		if (ans_res != "RDB") {
+			if (ans_res == "ERR") {
+				ans_strm.check_strict_end();
+				std::cout << DEFAULT_ERR_MSG << '\n';
+				return;
+			}
+			throw net::bad_response{"Unknown reply"};
 		}
-		throw net::bad_response{"Unknown reply"};
-	}
 
-	ans_res = ans_strm.read(2, 3);
-	ans_strm.check_strict_end();
+		ans_res = ans_strm.read(2, 3);
+		ans_strm.check_strict_end();
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server debug response"};
+	}
 
 	if (ans_res == "OK") {
 		setup_game_clientside(res[0]);
@@ -413,11 +456,20 @@ static void do_debug(net::stream<net::file_source>& msg, net::udp_connection& ud
 
 // Read a file name, size and its content
 static void read_file(net::stream<net::tcp_source>& ans_strm, net::field& name, net::field& file) {
-	auto fld = ans_strm.read(1, MAX_FNAME_SIZE);
+	net::field fld;
+	try {
+		fld = ans_strm.read(1, MAX_FNAME_SIZE);
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server filename"};
+	}
 	if (!net::is_valid_fname(fld))
 		throw net::bad_response{"Invalid filename"};
 	name = std::move(fld);
-	fld = ans_strm.read(1, MAX_FSIZE_LEN);
+	try {
+		fld = ans_strm.read(1, MAX_FSIZE_LEN);
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server file size"};
+	}
 
 	size_t fsize = 0;
 	try {
@@ -428,7 +480,11 @@ static void read_file(net::stream<net::tcp_source>& ans_strm, net::field& name, 
 	if (!net::is_valid_fsize(fsize))
 		throw net::bad_response{"Invalid file size"};
 
-	file = std::move(ans_strm.read(fsize, fsize, false));
+	try {
+		file = ans_strm.read(fsize, fsize, false);
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server file"};
+	}
 }
 
 // Write a file to the disk
@@ -455,21 +511,26 @@ static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connecti
 	if (!tcp.valid())
 		throw net::socket_error{"Could not open tcp socket"};
 	auto ans_strm = tcp.request(out_strm);
-	auto fld = ans_strm.read(3, 3);
-	if (fld != "RST") {
-		if (fld == "ERR") {
+	net::field fld;
+	try {
+		fld = ans_strm.read(3, 3);
+		if (fld != "RST") {
+			if (fld == "ERR") {
+				ans_strm.check_strict_end();
+				std::cout << DEFAULT_ERR_MSG << '\n';
+				return;
+			}
+			throw net::bad_response{"Unknown reply"};
+		}
+
+		fld = ans_strm.read(3, 3);
+		if (fld == "NOK") {
 			ans_strm.check_strict_end();
-			std::cout << DEFAULT_ERR_MSG << '\n';
+			std::cout << "The specified user has no recorded games (or a problem may have occured)\n";
 			return;
 		}
-		throw net::bad_response{"Unknown reply"};
-	}
-
-	fld = ans_strm.read(3, 3);
-	if (fld == "NOK") {
-		ans_strm.check_strict_end();
-		std::cout << "The specified user has no recorded games (or a problem may have occured)\n";
-		return;
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server show_trials response"};
 	}
 	bool is_FIN = fld == "FIN";
 	if (!is_FIN && fld != "ACT")
@@ -482,7 +543,11 @@ static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connecti
 
 	net::field fname, file;
 	read_file(ans_strm, fname, file);
-	ans_strm.check_strict_end();
+	try {
+		ans_strm.check_strict_end();
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server show_trials response"};
+	}
 	write_file(fname, file);
 	std::cout << modifier << " trials (at " << fname << ", " << file.size() << " bytes):\n" << file << '\n';
 }
@@ -499,28 +564,37 @@ static void do_scoreboard(net::stream<net::file_source>& msg, net::udp_connectio
 	if (!tcp.valid())
 		throw net::socket_error{"Could not open tcp socket"};
 	auto ans_strm = tcp.request(out_strm);
-	auto fld = ans_strm.read(3, 3);
-	if (fld != "RSS") {
-		if (fld == "ERR") {
+	net::field fld;
+	try {
+		fld = ans_strm.read(3, 3);
+		if (fld != "RSS") {
+			if (fld == "ERR") {
+				ans_strm.check_strict_end();
+				std::cout << DEFAULT_ERR_MSG << '\n';
+				return;
+			}
+			throw net::bad_response{"Unknown reply"};
+		}
+
+		fld = ans_strm.read(2, 5);
+		if (fld == "EMPTY") {
 			ans_strm.check_strict_end();
-			std::cout << DEFAULT_ERR_MSG << '\n';
+			std::cout << "The scoreboard is empty\n";
 			return;
 		}
-		throw net::bad_response{"Unknown reply"};
-	}
-
-	fld = ans_strm.read(2, 5);
-	if (fld == "EMPTY") {
-		ans_strm.check_strict_end();
-		std::cout << "The scoreboard is empty\n";
-		return;
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server scoreboard response"};
 	}
 	if (fld != "OK")
 		throw net::bad_response{"Unknown status"};
 	
 	net::field fname, file;
 	read_file(ans_strm, fname, file);
-	ans_strm.check_strict_end();
+	try {
+		ans_strm.check_strict_end();
+	} catch (net::interaction_error& err) {
+		throw net::bad_response{"Bad server scoreboard response"};
+	}
 	write_file(fname, file);
 	std::cout << "Scoreboard (at " << fname << ", " << file.size() << " bytes):\n" << file << '\n';
 }
