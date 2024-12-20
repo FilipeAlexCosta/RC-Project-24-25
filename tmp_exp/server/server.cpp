@@ -9,7 +9,9 @@
 
 static bool exit_server = false;
 
+//  Provides verbose logging funcitonality for the game server
 struct verbose {
+	// Writes a verbose log entry for a received request and its corresponding response
 	template<typename... Args>
 	static void write(const net::other_address& client, const std::string_view& resp, Args&&... args) {
 		if (!_mode)
@@ -24,14 +26,16 @@ struct verbose {
 			impl_verbose(std::forward<Args>(args)...);
 		std::cout << "\n | Response: " << resp << '\n' << std::endl;
 	}
-
+	// Enables or disables verbose mode
 	static void set(bool mode) { _mode = mode; }
 private:
+	// Base case for the recursive verbose logging function: logs a single argument.
 	template<typename Arg>
 	static void impl_verbose(Arg&& arg) {
 		std::cout << std::forward<Arg>(arg);
 	}
 
+	// Recursive case for verbose logging: logs the first argument and continues with the rest.
 	template<typename Arg, typename... Args>
 	static void impl_verbose(Arg&& arg, Args&&... args) {
 		std::cout << std::forward<Arg>(arg);
@@ -234,6 +238,8 @@ int main(int argc, char** argv) {
 	return 0;
 }
 
+/// Handles incoming UDP connectections. It listens for incoming udp requests,
+/// executes the corresponding actions and communicates the results to the client
 static void handle_udp(net::udp_connection& udp_conn, const udp_action_map& actions) {
 	net::other_address client_addr;
 	auto request = udp_conn.listen(client_addr);
@@ -247,6 +253,9 @@ static void handle_udp(net::udp_connection& udp_conn, const udp_action_map& acti
 	}
 }
 
+/// Handles incoming TCP connections. It accepts incoming TCP client connections and
+/// creates a child process to habdle each connection. Each child process executes the
+/// corresponding actions and communicates the results to the client
 static void handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions) {
 	net::other_address client_addr;
 	auto tcp_conn = tcp_sv.accept_client(client_addr);
@@ -269,6 +278,8 @@ static void handle_tcp(net::tcp_server& tcp_sv, const tcp_action_map& actions) {
 	}
 }
 
+/// Handles the 'start' command received from a client by creating a new game
+/// (only if the received plid doesn't have an ongoing game)
 static void start_new_game(net::stream<net::udp_source>& req,
 							const net::udp_connection& udp_conn,
 							const net::other_address& client_addr) {
@@ -328,6 +339,7 @@ static void start_new_game(net::stream<net::udp_source>& req,
 	udp_conn.answer(out_strm, client_addr);
 }
 
+/// Handles a request to end an ongoing game (if there is one) of a given player.
 static void end_game(net::stream<net::udp_source>& req,
 					const net::udp_connection& udp_conn,
 					const net::other_address& client_addr) {
@@ -393,6 +405,9 @@ static void end_game(net::stream<net::udp_source>& req,
 	udp_conn.answer(out_strm, client_addr);
 }
 
+/// Handles the 'debug' command received from a client by creating a new game
+/// with the given secret key. (a new game is created only if the plid doesn't
+/// have an ongoing game)                                                                                                                                                 )
 static void start_new_game_debug(net::stream<net::udp_source>& req,
 								const net::udp_connection& udp_conn,
 								const net::other_address& client_addr) {
@@ -485,6 +500,10 @@ static void start_new_game_debug(net::stream<net::udp_source>& req,
 	udp_conn.answer(out_strm, client_addr);
 }
 
+/// Handles the 'try' command received from a client by checking if the guess made
+/// by the player is the secret key. Also checks if the maximum number of trials
+/// has been exceeded or if the maximum playtime has been reached (in this cases
+/// the player loses the game)
 static void do_try(net::stream<net::udp_source>& req,
 					const net::udp_connection& udp_conn,
 					const net::other_address& client_addr) {
@@ -579,7 +598,9 @@ static void do_try(net::stream<net::udp_source>& req,
 	}
 
 	char duplicate_at = gm.is_duplicate(play);
-	if (trial != gm.current_trial() + 1) {
+	if (trial != gm.current_trial() + 1) { // trial is not the expected
+		// trial received is a resend 
+		// (nT = expected - 1 & guess repeats the one of the previous message)
 		if (trial == gm.current_trial() && duplicate_at == gm.current_trial()) {
 			out_strm.write("OK");
 			out_strm.write(gm.current_trial());
@@ -595,6 +616,8 @@ static void do_try(net::stream<net::udp_source>& req,
 			return;
 		}
 
+		// nT != expected - 1 OR
+		// nT = expected - 1 & guess is different from the previous message
 		out_strm.write("INV").prime();
 		verbose::write(client_addr, 
 			"invalid trial request",
@@ -607,6 +630,7 @@ static void do_try(net::stream<net::udp_source>& req,
 		return;
 	}
 
+	// guess repeats a previous trial's guess
 	if (duplicate_at != MAX_TRIALS + 1) {
 		out_strm.write("DUP").prime();
 		verbose::write(client_addr, 
@@ -620,6 +644,7 @@ static void do_try(net::stream<net::udp_source>& req,
 	}
 
 	game::result play_res = gm.guess(play);
+	// check enging game conditions
 	if (play_res == game::result::LOST_TIME || play_res == game::result::LOST_TRIES) {
 		if (play_res == game::result::LOST_TIME) {
 			out_strm.write("ETM");
@@ -645,6 +670,8 @@ static void do_try(net::stream<net::udp_source>& req,
 		udp_conn.answer(out_strm, client_addr);
 		return;
 	}
+
+	// trial is valid
 	out_strm.write("OK");
 	out_strm.write(gm.current_trial());
 	out_strm.write(gm.last_trial()->nB + '0');
@@ -658,6 +685,8 @@ static void do_try(net::stream<net::udp_source>& req,
 	udp_conn.answer(out_strm, client_addr);
 }
 
+/// Handles the 'show trials'/'st' command received from a client by sending a file
+///  containing a list of the trials made by the player. 
 static void show_trials(net::stream<net::tcp_source>& req,
 									  const net::tcp_connection& tcp_conn,
 									  const net::other_address& client_addr) {
@@ -716,6 +745,8 @@ static void show_trials(net::stream<net::tcp_source>& req,
 	return;
 }
 
+/// Handles the 'show scoreboard'/'sb' command received from a client by sending a file
+/// containing the scoreboard (the top 10 scores)
 static void show_scoreboard(net::stream<net::tcp_source>& req,
 							const net::tcp_connection& tcp_conn,
 							const net::other_address& client_addr) {
