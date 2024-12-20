@@ -351,8 +351,14 @@ void game::create() {
 	} catch (std::exception& err) {
 		throw net::io_error{"Failed while checking if game existed"};
 	}
-	if (exists)
-		throw net::game_error{"Ongoing game"};
+	if (exists) {
+		result existing_res = result::QUIT;
+		try { // move game if it ended
+			existing_res = find_active(_plid).has_ended();
+		} catch (net::game_error& err) {} // ignore "No active games"
+		if (existing_res == result::ONGOING)
+			throw net::game_error{"Ongoing game"};
+	}
 	std::fstream out{path, std::ios::out};
 	if (!out)
 		throw net::io_error{"Failed to open game file"};

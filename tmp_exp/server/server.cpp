@@ -648,19 +648,19 @@ static void do_try(net::stream<net::udp_source>& req,
 		if (play_res == game::result::LOST_TIME) {
 			out_strm.write("ETM");
 			verbose::write(client_addr, 
-			"maximum time achieved",
-			"PLID=", plid,
-			", GUESS=", std::string_view{play, GUESS_SIZE},
-			", TRIAL_NUMBER=", trial
+				"maximum time achieved",
+				"PLID=", plid,
+				", GUESS=", std::string_view{play, GUESS_SIZE},
+				", TRIAL_NUMBER=", trial
 			);
 		}
 		else {
 			out_strm.write("ENT");
 			verbose::write(client_addr, 
-			"maximum number of trials (8) achieved",
-			"PLID=", plid,
-			", GUESS=", std::string_view{play, GUESS_SIZE},
-			", TRIAL_NUMBER=", trial
+				"maximum number of trials (8) achieved",
+				"PLID=", plid,
+				", GUESS=", std::string_view{play, GUESS_SIZE},
+				", TRIAL_NUMBER=", trial
 			);
 		}
 		for (int i = 0; i < GUESS_SIZE; i++)
