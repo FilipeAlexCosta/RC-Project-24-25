@@ -559,7 +559,7 @@ static void do_try(net::stream<net::udp_source>& req,
 		out_strm.write("ERR").prime();
 		verbose::write(client_addr, 
 			"could not read trial number/incorrect message ending",
-			", PLID=", plid,
+			"PLID=", plid,
 			", GUESS=", std::string_view{play, GUESS_SIZE}
 		);
 		udp_conn.answer(out_strm, client_addr);
@@ -624,7 +624,6 @@ static void do_try(net::stream<net::udp_source>& req,
 			", GUESS=", std::string_view{play, GUESS_SIZE},
 			", TRIAL_NUMBER=", trial
 		);
-		gm.quit(); // terminate game
 		udp_conn.answer(out_strm, client_addr);
 		return;
 	}
