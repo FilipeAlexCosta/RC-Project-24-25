@@ -184,7 +184,7 @@ static void do_start(net::stream<net::file_source>& msg, net::udp_connection& ud
 	}
 
 	if (res == "ERR") {
-		std::cout << "Server got incorrect start synteax (ERR)\n";
+		std::cout << "Server got incorrect start syntax (ERR)\n";
 		return;
 	}
 	throw net::bad_response{"Unknown status"};
@@ -474,15 +474,17 @@ static void do_show_trials(net::stream<net::file_source>& msg, net::udp_connecti
 	bool is_FIN = fld == "FIN";
 	if (!is_FIN && fld != "ACT")
 		throw net::bad_response{"Unknown status"};
-	if (is_FIN)
+	std::string modifier = "Active";
+	if (is_FIN) {
 		in_game = false;
+		modifier = "Finished";
+	}
 
 	net::field fname, file;
 	read_file(ans_strm, fname, file);
 	ans_strm.check_strict_end();
 	write_file(fname, file);
-	std::cout << "Trial file:\n" << file << '\n';
-
+	std::cout << modifier << " trials (at " << fname << ", " << file.size() << " bytes):\n" << file << '\n';
 }
 
 // Implements the 'scoreboard' command by asking the game server to send the scoreboard by establishing a TCP session
@@ -520,5 +522,5 @@ static void do_scoreboard(net::stream<net::file_source>& msg, net::udp_connectio
 	read_file(ans_strm, fname, file);
 	ans_strm.check_strict_end();
 	write_file(fname, file);
-	std::cout << "Scoreboard:\n" << file << std::endl;
+	std::cout << "Scoreboard (at " << fname << ", " << file.size() << " bytes):\n" << file << '\n';
 }
