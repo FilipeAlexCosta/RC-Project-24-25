@@ -1,58 +1,6 @@
 #include "common.hpp"
 
-#include <stdexcept>
-#include <iostream>
-
 using namespace net;
-
-trace err;
-
-trace::builder::builder(trace& parent, bool is_fatal) : _par{parent},
-	_is_fatal{is_fatal} {}
-
-void trace::builder::operator<<(action_status cause) && {
-	if (cause == action_status::OK)
-		return;
-	auto more = _more.str();
-	if (more.empty())
-		more = status_to_message(cause);
-	_par._trace.push_back(record{cause, std::move(more)});
-	_par._fatal |= static_cast<bool>(_is_fatal);
-}
-
-action_status trace::peek() {
-	if (_trace.empty())
-		return net::action_status::OK;
-	return _trace.back().cause;
-}
-
-bool trace::swallow() {
-	if (_fatal)
-		return false;
-	_trace.clear();
-	return true;
-}
-
-bool trace::dump() {
-	if (_trace.empty())
-		return true;
-	if (_fatal)
-		std::cerr << "[Fatal Error]:";
-	else
-		std::cerr << "[Error]:";
-	for (ssize_t i = _trace.size() - 1; i > -1; i--)
-		std::cerr << "\n | [" << i << "]: " << _trace[i].more;
-	std::cerr << std::endl;
-	if (!_fatal) {
-		_trace.clear();
-		return true;
-	}
-	return false;
-}
-
-trace::builder trace::operator<<(bool is_fatal) {
-	return builder{*this, is_fatal};
-}
 
 self_address::self_address(const std::string_view& other_addr, const std::string_view& other_port, int socktype, int family)
 	: _fam{family}, _sockt{socktype}, _passive{false} {
@@ -130,7 +78,7 @@ udp_connection::udp_connection(self_address&& self, size_t timeout) : _self{std:
 		return;
 	if ((_fd = socket(_self.family(), _self.socket_type(), 0)) == -1)
 		return;
-	if (_self.is_passive()) {
+	if (_self.is_passive()) { // bind if passive
 		if (bind(_fd, _self.unwrap()->ai_addr, _self.unwrap()->ai_addrlen) == -1) {
 			close(_fd);
 			_fd = -1;
@@ -139,7 +87,7 @@ udp_connection::udp_connection(self_address&& self, size_t timeout) : _self{std:
 	}
 	if (timeout == 0)
 		return;
-	timeval t;
+	timeval t; // set timeout
 	t.tv_sec = timeout; // s second timeout
 	t.tv_usec = 0;
 	if (setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1
@@ -177,39 +125,36 @@ bool udp_connection::valid() const {
 	return _fd != -1;
 }
 
-std::pair<action_status, stream<udp_source>> udp_connection::request(const out_stream& msg, other_address& other) {
+stream<udp_source> udp_connection::request(const out_stream& msg, other_address& other) {
 	auto to_send = msg.view();
 	other.addrlen = sizeof(other.addr);
 	for (int retries = 0; retries < MAX_RESEND; retries++) {
 		int n = sendto(_fd, to_send.data(), to_send.size(), 0, _self.unwrap()->ai_addr, _self.unwrap()->ai_addrlen);
 		if (n == -1)
-			return {action_status::SEND_ERR, {std::string_view{}}};
+			throw conn_error{"Failed to send udp data"};
 		n = recvfrom(_fd, _buf, UDP_MSG_SIZE, 0, (struct sockaddr*) &other.addr, &other.addrlen);
-		if (n >= 0) {
-			std::cerr << "UDP Response: \"" << std::string_view{_buf, static_cast<size_t>(n)} << "\"" <<std::endl;
-			return {action_status::OK, {std::string_view{_buf, static_cast<size_t>(n)}}};
-		}
+		if (n >= 0)
+			return {std::string_view{_buf, static_cast<size_t>(n)}};
 		n = -1;
 		if (errno != EWOULDBLOCK && errno != EAGAIN)
-			return {action_status::RECV_ERR, {std::string_view{}}};
+			throw conn_error{"Failed to receive udp data"};
 	}
-	return {action_status::CONN_TIMEOUT, {std::string_view{}}};
+	throw socket_error{"UDP Connection timed out"};
 }
 
-action_status udp_connection::answer(const out_stream& msg, const other_address& other) const {
+void udp_connection::answer(const out_stream& msg, const other_address& other) const {
 	auto to_send = msg.view();
 	int n = sendto(_fd, to_send.data(), to_send.size(), 0, (struct sockaddr*) &other.addr, other.addrlen);
 	if (n == -1)
-		return action_status::SEND_ERR;
-	return action_status::OK;
+		throw conn_error{"Failed to send udp data"};
 }
 
-std::pair<action_status, stream<udp_source>> udp_connection::listen(other_address& other) {
+stream<udp_source> udp_connection::listen(other_address& other) {
 	other.addrlen = sizeof(other.addr);
 	int n = recvfrom(_fd, _buf, UDP_MSG_SIZE, 0, (struct sockaddr*) &other.addr, &other.addrlen);
 	if (n == -1)
-		return {action_status::RECV_ERR, {std::string_view{}}};
-	return {action_status::OK, {std::string_view{_buf, static_cast<size_t>(n)}}};
+		throw conn_error{"Failed to receive udp data"};
+	return {std::string_view{_buf, static_cast<size_t>(n)}};
 }
 
 int udp_connection::get_fildes() {
@@ -249,7 +194,7 @@ tcp_connection::tcp_connection(const self_address& self, size_t timeout) {
 	}
 	if (timeout == 0)
 		return;
-	timeval t;
+	timeval t; // set timeout
 	t.tv_sec = timeout; // s second timeout
 	t.tv_usec = 0;
 	if (setsockopt(_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1
@@ -283,27 +228,29 @@ bool tcp_connection::valid() const {
 	return _fd != -1;
 }
 
-std::pair<action_status, stream<tcp_source>> tcp_connection::request(const out_stream& msg) const {
-	action_status status = answer(msg);
-	if (status != action_status::OK)
-		return {status, {-1}};
-	return {action_status::OK, {_fd}};
+stream<tcp_source> tcp_connection::request(const out_stream& msg) const {
+	answer(msg);
+	return {_fd};
 }
 
 stream<tcp_source> tcp_connection::to_stream() const {
 	return stream<tcp_source>{_fd};
 }
 
-action_status tcp_connection::answer(const out_stream& out) const {
+void tcp_connection::answer(const out_stream& out) const {
 	size_t done = 0;
 	auto view = out.view();
 	while (done < view.size()) {
 		int n = write(_fd, view.data() + done, view.size() - done);
-		if (n <= 0)
-			return action_status::SEND_ERR;
+		if (n == 0)
+			throw socket_closed_error{"Socket was closed midway"};
+		if (n < 0) {
+			if (errno == EPIPE)
+				throw socket_closed_error{"Socket was closed midway"};
+			throw conn_error{"Failed to send tcp data"};
+		}
 		done += n;
 	}
-	return action_status::OK;
 }
 
 tcp_server::tcp_server(const self_address& self, size_t sub_conns) : tcp_connection{self, 0} {
@@ -319,15 +266,15 @@ tcp_server::tcp_server(const self_address& self, size_t sub_conns) : tcp_connect
 	}
 }
 
-std::pair<action_status, tcp_connection> tcp_server::accept_client(other_address& other) {
+tcp_connection tcp_server::accept_client(other_address& other) {
 	int new_fd = -1;
 	other.addrlen = sizeof(other.addr);
 	if ((new_fd = accept(_fd, (sockaddr*) &other.addr, &other.addrlen)) == -1)
-		return {net::action_status::CONN_ERR, tcp_connection{}};
+		throw socket_error{"Failed to accept a new client"};
 	tcp_connection new_conn{new_fd};
 	if (!new_conn.valid())
-		return {net::action_status::CONN_ERR, tcp_connection{}};
-	return {net::action_status::OK, std::move(new_conn)};
+		throw socket_error{"Failed to create a new socket"};
+	return new_conn;
 }
 
 bool tcp_server::valid() const {
@@ -357,27 +304,27 @@ bool file_source::is_skippable(char c) const {
 	return std::isspace(c) && c != DEFAULT_EOM;
 }
 
-action_status file_source::read_len(std::string& buf, size_t len, size_t& n, bool check_eom) {
+void file_source::read_len(std::string& buf, size_t len, size_t& n, bool check_eom) {
 	n = 0;
 	if (len == 0)
-		return action_status::OK;
+		return;
 	if (_finished) {
 		if (_found_eom)
-			return net::action_status::OK;
-		return net::action_status::MISSING_EOM;
+			return;
+		throw missing_eom{};
 	}
 	char temp[len];
 	while (len != 0) {
 		int res = read(_fd, temp, len);
 		if (res < 0)
-			return action_status::CONN_TIMEOUT;
-		if (res == 0) {
+			throw net::io_error{"Failed to read from source"};
+		if (res == 0) { // EOF
 			_finished = true;
-			return net::action_status::MISSING_EOM;
+			throw missing_eom{};
 		}
 		len -= res;
 		if (check_eom && temp[res - 1] == DEFAULT_EOM) {
-			res--;
+			res--; // don't append EOM
 			len = 0;
 			_finished = true;
 			_found_eom = true;
@@ -385,7 +332,6 @@ action_status file_source::read_len(std::string& buf, size_t len, size_t& n, boo
 		buf.append(temp, temp + res);
 		n += res;
 	}
-	return action_status::OK;
 }
 
 tcp_source::tcp_source(int fd) : net::file_source{fd} {}
@@ -398,32 +344,31 @@ string_source::string_source(const std::string_view& source) : _source(source) {
 
 string_source::string_source(std::string_view&& source) : _source(std::move(source)) {}
 
-action_status string_source::read_len(std::string& buf, size_t len, size_t& n, bool check_eom) {
+void string_source::read_len(std::string& buf, size_t len, size_t& n, bool check_eom) {
 	n = 0;
 	if (len == 0)
-		return action_status::OK;
+		return;
 	if (_finished) {
 		if (_found_eom)
-			return net::action_status::OK;
-		return net::action_status::MISSING_EOM;
+			return;
+		throw missing_eom{};
 	}
 	size_t end = _at + len;
 	if (end > _source.size()) {
 		end = _source.size();
 		_finished = true;
 		if (_source.back() != DEFAULT_EOM)
-			return net::action_status::MISSING_EOM;
+			throw missing_eom{};
 	}
 	buf.append(std::begin(_source) + _at, std::begin(_source) + end);
 	n = end - _at;
 	_at = end;
 	if (check_eom && buf.back() == DEFAULT_EOM) {
-		n--;
+		n--; // ignore EOM
 		buf.pop_back();
 		_found_eom = true;
 		_finished = true;
 	}
-	return net::action_status::OK;
 }
 
 bool string_source::is_skippable(char c) const {
@@ -438,24 +383,18 @@ bool udp_source::is_skippable(char c) const {
 }
 
 out_stream& out_stream::write(const field& f) {
-	if (_primed)
-		_primed = false;
 	_buf.append(std::begin(f), std::end(f));
 	_buf.push_back(DEFAULT_SEP);
 	return *this;
 }
 
 out_stream& out_stream::write(char c) {
-	if (_primed)
-		_primed = false;
 	_buf.push_back(c);
 	_buf.push_back(DEFAULT_SEP);
 	return *this;
 }
 
 out_stream& out_stream::write_and_fill(const field& f, size_t n, char fill) {
-	if (_primed)
-		_primed = false;
 	if (n > f.size())
 		_buf.insert(_buf.size(), n - f.size(), fill);
 	_buf.append(std::begin(f), std::end(f));
@@ -464,8 +403,6 @@ out_stream& out_stream::write_and_fill(const field& f, size_t n, char fill) {
 }
 
 out_stream& out_stream::prime() {
-	if (_primed)
-		return *this;
 	if (!_buf.empty())
 		_buf.back() = DEFAULT_EOM;
 	else
@@ -477,166 +414,50 @@ const std::string_view out_stream::view() const {
 	return _buf;
 }
 
-std::string net::status_to_message(action_status status) {
-	std::string res = "get_error_message failed";
-	switch (status) {
-		case action_status::OK:
-			res = "No error";
-			break;
-
-		case action_status::UNK_ACTION:
-			res = "Requested command does not exist";
-			break;
-
-		case action_status::RET_ERR:
-			res = "Server received unexpected request";
-			break;
-
-		case action_status::MISSING_ARG:
-			res = "Missing arguments for requested command";
-			break;
-
-		case action_status::EXCESS_ARGS:
-			res = "Excess arguments for requested command";
-			break;
-
-		case action_status::BAD_ARG:
-			res = "Ilegal argument for requested command";
-			break;
-
-		case action_status::ERR:
-			res = "Message did not match the expected format";
-			break;
-
-		case action_status::ONGOING_GAME:
-			res = "Requested command can only be called after finishing the current game";
-			break;
-
-		case action_status::NOT_IN_GAME:
-			res = "Requested command can only be called after starting a game";
-			break;
-
-		case action_status::SEND_ERR:
-			res = "Failed to send message to the server. Please check the server address and port, or try again later";
-			break;
-
-		case action_status::CONN_TIMEOUT:
-			res = "Connection timed out";
-			break;
-
-		case action_status::RECV_ERR:
-			res = "Failed to receive a response from the server"; 
-			break;
-
-		case action_status::MISSING_EOM:
-			res = "Message did not end with \"end of message\" (EOM)";
-			break;
-
-		case action_status::UNK_REPLY:
-			res = "Unknown reply in received answer";
-			break;
-
-		case action_status::UNK_STATUS:
-			res = "Unknown status in received answer";
-			break;
-
-		case action_status::START_NOK:
-			res = "User with the given player ID is already in-game";
-			break;
-
-		case action_status::START_ERR:
-			res = "Malformed request: either the syntax, player ID or time were incorrect";
-			break;
-
-		case action_status::DEBUG_ERR:
-			res = "Malformed request: either the syntax, player ID, time or color code were incorrect";
-			break;
-		case action_status::QUIT_EXIT_ERR:
-			res = "Malformed request: either the syntax or player ID were incorrect";
-			break;
-		case action_status::TRY_NT:
-			res = "Trial number mismatch, trials Resynchronized";
-			break;
-		case action_status::TRY_ERR:
-			res = "Malformed request: either the syntax, player ID or the colour code were incorrect";
-			break;
-		case action_status::TRY_DUP:
-			res = "Duplicated guess. Try a different guess";
-			break;
-		case action_status::TRY_INV:
-			res = "Invalid trial, the trial number isn't the expected value";
-			break;
-		case action_status::TRY_NOK:
-			res = "Trial out of context (possibly no ongoing game)";
-			break;
-		case action_status::TRY_ENT:
-			res = "Maximum number of attemps achieved (8), you lost the game";
-			break;
-		case action_status::TRY_ETM:
-			res = "Maximum play time achieved, you lost the game";
-			break;
-		case action_status::CONN_ERR:
-			res = "Could not connect to server (check address and port)";
-			break;
-		case action_status::PERSIST_ERR:
-			res = "Could not read/write a file";
-			break;
-		case action_status::FS_ERR:
-			res = "Failed to open/close a file";
-			break;
-		case action_status::NOT_FOUND:
-			res = "Did not find requested file";
-			break;
-		default:
-			res = "Unknown error";
-	}
-	return res;
-}
-
-action_status net::is_valid_plid(const field& field) {
+bool net::is_valid_plid(const field& field) {
 	if (field.length() != PLID_SIZE) // PLID has 6 digits
-		return net::action_status::BAD_ARG;
+		return false;
 	for (char c : field)
 		if (c < '0' || c > '9')
-			return net::action_status::BAD_ARG;
-	return net::action_status::OK;
+			return false;
+	return true;
 }
 
-action_status net::is_valid_max_playtime(const field& field) {
+bool net::is_valid_max_playtime(const field& field) {
 	if (field.length() > 3) // avoid out_of_range exception
-		return net::action_status::BAD_ARG;
+		return false;
 	for (auto c : field)
 		if (c < '0' || c > '9')
-			return net::action_status::BAD_ARG;
+			return false;
 	int max_playtime = -1;
 	try {
 		max_playtime = std::stoi(std::string(field));
 	} catch (const std::invalid_argument& err) { // cannot be read
-		return net::action_status::BAD_ARG;
+		return false;
 	} // out_of_range exception shouldn't be an issue
 	if (max_playtime < 0 || max_playtime > MAX_PLAYTIME)
-		return net::action_status::BAD_ARG;
-	return net::action_status::OK;
+		return false;
+	return true;
 }
 
-action_status net::is_valid_color(const field& field) {
+bool net::is_valid_color(const field& field) {
 	if (field.length() != 1)
-        return action_status::BAD_ARG;
+		return false;
 	for (auto col : VALID_COLORS)
 		if (field[0] == col)
-			return action_status::OK;
-    return action_status::BAD_ARG;
+			return true;
+	return false;
 }
 
-action_status net::is_valid_fname(const field& field) {
+bool net::is_valid_fname(const field& field) {
 	if (field.length() >= MAX_FNAME_SIZE || field.length() < 4)
-		return net::action_status::BAD_ARG; // .txt
+		return false; // .txt
 	if (field.substr(field.length() - 4) != ".txt")
-		return net::action_status::BAD_ARG;
+		return false;
 	for (auto c : field)
 		if (!std::isalnum(c) && c != '.' && c != '-' && c != '_')
-			return net::action_status::BAD_ARG;
-	return net::action_status::OK;
+			return false;
+	return true;
 }
 
 bool net::is_valid_fsize(size_t fsize) {
